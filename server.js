@@ -98,6 +98,10 @@ function startFfmpeg() {
     "-hide_banner",
     "-loglevel",
     "warning",
+    "-fflags",
+    "nobuffer",
+    "-flags",
+    "low_delay",
     "-i",
     UDP_URL,
     // Avoid audio complications by default (stream is usually video-only)
