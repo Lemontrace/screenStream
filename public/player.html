@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>screenStream</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Arial,
+          sans-serif;
+        margin: 24px;
+        color: #111;
+      }
+      .wrap {
+        max-width: 900px;
+      }
+      video {
+        width: 100%;
+        background: #000;
+        border-radius: 10px;
+      }
+      code {
+        background: #f3f3f3;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h2>screenStream</h2>
+      <p>HLS playlist: <code id="url">/hls/index.m3u8</code></p>
+      <video id="v" controls autoplay muted playsinline></video>
+      <p>
+        This player uses <code>hls.js</code> when needed so it should work in
+        modern Chromium/Firefox/Safari as long as the HLS stream is running.
+      </p>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+    <script>
+      const video = document.getElementById("v");
+      const url = "/hls/index.m3u8";
+      document.getElementById("url").textContent = url;
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari / some browsers with native HLS
+        video.src = url;
+      } else if (window.Hls && Hls.isSupported()) {
+        const hls = new Hls({
+          lowLatencyMode: true,
+          backBufferLength: 30,
+        });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+      } else {
+        video.outerHTML +=
+          "<p>Your browser cannot play HLS and hls.js is not available.</p>";
+      }
+    </script>
+  </body>
+</html>
