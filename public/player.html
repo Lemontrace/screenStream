@@ -44,7 +44,8 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
     <script>
       const video = document.getElementById("v");
-      const url = "/hls/index.m3u8";
+      const tokenPrefix = window.location.pathname.split("/").slice(0, 2).join("/");
+      const url = `${tokenPrefix}/hls/index.m3u8`;
       document.getElementById("url").textContent = url;
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
         // Safari / some browsers with native HLS

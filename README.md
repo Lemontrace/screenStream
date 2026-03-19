@@ -18,9 +18,9 @@ npm install
 
 Default settings:
 
-- UDP ingest: `udp://0.0.0.0:5000`
-- HTTP port: `8080`
-- HLS served at: `/hls/index.m3u8`
+- UDP ingest: `udp://0.0.0.0:5555`
+- HTTP port: `7777`
+- Fixed token: `6f3a9c2d4e8b1a7d9f0c5b3e2a1d4f6b`
 
 ```bash
 npm start
@@ -29,8 +29,8 @@ npm start
 ### One-process mode (capture screen + UDP + HLS)
 
 If you want this app to also do the local screen capture (so you don't run a separate `ffmpeg`),
-enable capture with `CAPTURE=1`. By default it captures via **Wayland/PipeWire** and sends to a
-local UDP port that the server ingests.
+enable capture with `CAPTURE=1`. By default it captures via X11 and sends to a local UDP port that
+the server ingests.
 
 ```bash
 CAPTURE=1 npm start
@@ -39,23 +39,29 @@ CAPTURE=1 npm start
 Common options:
 
 ```bash
-# Wayland (PipeWire) - DEFAULT
-CAPTURE=1 CAPTURE_MODE=pipewire CAPTURE_PIPEWIRE_NODE=0 CAPTURE_SIZE=1920x1080 CAPTURE_FPS=30 npm start
-
-# X11
+# X11 (default)
 CAPTURE=1 CAPTURE_MODE=x11 CAPTURE_X11_DISPLAY=":0.0" CAPTURE_SIZE=1920x1080 CAPTURE_FPS=30 npm start
+
+# Wayland (PipeWire)
+CAPTURE=1 CAPTURE_MODE=pipewire CAPTURE_PIPEWIRE_NODE=0 CAPTURE_SIZE=1920x1080 CAPTURE_FPS=30 npm start
 ```
 
 Check status:
 
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:7777/health
 ```
 
-Open:
+Open (fixed token paths):
 
-- Player page: `http://localhost:8080/player`
-- HLS playlist: `http://localhost:8080/hls/index.m3u8`
+- Player page: `http://localhost:7777/6f3a9c2d4e8b1a7d9f0c5b3e2a1d4f6b/player`
+- HLS playlist: `http://localhost:7777/6f3a9c2d4e8b1a7d9f0c5b3e2a1d4f6b/hls/index.m3u8`
+
+To change token:
+
+```bash
+STREAM_TOKEN=my-fixed-token npm start
+```
 
 ## 2) Capture screen and send MPEG-TS over UDP (on capture machine)
 

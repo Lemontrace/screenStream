@@ -8,6 +8,10 @@ const app = express();
 
 const PORT = Number(process.env.PORT || 7777);
 const HOST = process.env.HOST || "0.0.0.0";
+const DEFAULT_STREAM_TOKEN = "1d0299bfec9692ebbc16c73d7dec1fd2";
+const STREAM_TOKEN = process.env.STREAM_TOKEN || DEFAULT_STREAM_TOKEN;
+const PLAYER_PATH = `/${STREAM_TOKEN}/player`;
+const HLS_BASE_PATH = `/${STREAM_TOKEN}/hls`;
 
 // UDP input carrying MPEG-TS (from your capture machine)
 // Example: udp://0.0.0.0:5000?fifo_size=1000000&overrun_nonfatal=1
@@ -165,19 +169,22 @@ app.get("/health", (req, res) => {
     udpUrl: UDP_URL,
     videoMode: VIDEO_MODE,
     hlsDir: HLS_DIR,
-    playlist: `/hls/${PLAYLIST}`,
+    playlist: `${HLS_BASE_PATH}/${PLAYLIST}`,
   });
 });
 
-app.use(express.static(path.join(process.cwd(), "public"), { etag: false }));
+app.use(HLS_BASE_PATH, express.static(HLS_DIR, { etag: false }));
 
-app.get("/player", (req, res) => {
+app.get(PLAYER_PATH, (req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "player.html"));
 });
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`HTTP server listening on http://${HOST}:${PORT}`);
-  console.log(`HLS playlist at http://${HOST}:${PORT}/hls/${PLAYLIST}`);
+  console.log(`Private player URL: http://${HOST}:${PORT}${PLAYER_PATH}`);
+  console.log(
+    `Private HLS URL: http://${HOST}:${PORT}${HLS_BASE_PATH}/${PLAYLIST}`,
+  );
   startFfmpeg();
   if (HLS_CLEAN_INTERVAL_MS > 0) {
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
