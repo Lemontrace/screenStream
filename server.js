@@ -108,8 +108,8 @@ function startFfmpeg() {
     "low_delay",
     "-i",
     UDP_URL,
-    // Avoid audio complications by default (stream is usually video-only)
-    "-an",
+    "-c:a",
+    "copy",
     "-f",
     "hls",
     "-hls_time",
@@ -143,9 +143,15 @@ function startFfmpeg() {
         ]
       : ["-c:v", "copy"];
 
+  const audioArgs =
+    VIDEO_MODE === "encode"
+      ? ["-c:a", "aac", "-b:a", "128k"]
+      : ["-c:a", "copy"];
+
   const args = [...baseArgs];
-  // Insert video args right after input
-  args.splice(10, 0, ...videoArgs);
+  // Insert video and audio args right after input (before -c:a copy in baseArgs)
+  const insertIdx = baseArgs.indexOf("-c:a");
+  args.splice(insertIdx, 2, ...videoArgs, ...audioArgs);
 
   ffmpegChild = spawn("ffmpeg", args, {
     stdio: ["ignore", "inherit", "inherit"],
