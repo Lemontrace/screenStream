@@ -111,7 +111,7 @@ function startFfmpeg() {
     "-map",
     "0:v:0",
     "-map",
-    "0:a:0?",
+    "0:a:0",
     "-f",
     "hls",
     "-hls_time",
@@ -145,10 +145,7 @@ function startFfmpeg() {
         ]
       : ["-c:v", "copy"];
 
-  const audioArgs =
-    VIDEO_MODE === "encode"
-      ? ["-c:a", "aac", "-b:a", "128k"]
-      : ["-c:a", "copy"];
+  const audioArgs = ["-c:a", "aac", "-b:a", "128k"];
 
   const args = [...baseArgs];
   // Insert video and audio codec args after -map (replace -map 0:a:0? placeholder)
