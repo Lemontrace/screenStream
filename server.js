@@ -108,8 +108,10 @@ function startFfmpeg() {
     "low_delay",
     "-i",
     UDP_URL,
-    "-c:a",
-    "copy",
+    "-map",
+    "0:v:0",
+    "-map",
+    "0:a:0?",
     "-f",
     "hls",
     "-hls_time",
@@ -149,9 +151,9 @@ function startFfmpeg() {
       : ["-c:a", "copy"];
 
   const args = [...baseArgs];
-  // Insert video and audio args right after input (before -c:a copy in baseArgs)
-  const insertIdx = baseArgs.indexOf("-c:a");
-  args.splice(insertIdx, 2, ...videoArgs, ...audioArgs);
+  // Insert video and audio codec args after -map (replace -map 0:a:0? placeholder)
+  const insertIdx = baseArgs.indexOf("-map") + 4;
+  args.splice(insertIdx, 0, ...videoArgs, ...audioArgs);
 
   ffmpegChild = spawn("ffmpeg", args, {
     stdio: ["ignore", "inherit", "inherit"],
