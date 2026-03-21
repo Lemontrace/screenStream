@@ -145,7 +145,7 @@ function startFfmpeg() {
         ]
       : ["-c:v", "copy"];
 
-  const audioArgs = ["-c:a", "aac", "-b:a", "128k"];
+  const audioArgs = ["-c:a", "aac", "-b:a", "256k"];
 
   const args = [...baseArgs];
   // Insert video and audio codec args after -map (replace -map 0:a:0? placeholder)
