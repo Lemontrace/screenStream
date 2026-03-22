@@ -15,10 +15,15 @@ const PUBLIC = path.join(process.cwd(), "public");
 // Admin auth — always override ADMIN_PASSWORD via env in production
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 
-// UDP input carrying MPEG-TS
-const UDP_URL =
-  process.env.UDP_URL ||
-  "udp://0.0.0.0:5555?fifo_size=1000000&overrun_nonfatal=1";
+// SRT input from OBS
+// Set SRT_PASSPHRASE in .env — without it the stream is unauthenticated
+const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || "";
+if (!SRT_PASSPHRASE) {
+  console.warn("[warn] SRT_PASSPHRASE is not set — stream is unauthenticated");
+}
+const SRT_URL =
+  process.env.SRT_URL ||
+  `srt://0.0.0.0:5555?mode=listener&pbkeylen=32${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
 
 // HLS output
 const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
@@ -59,6 +64,11 @@ const sessions = new Map();
 function createSession() {
   const id = crypto.randomBytes(32).toString("hex");
   sessions.set(id, { createdAt: Date.now() });
+  // Prune expired sessions so the map doesn't grow indefinitely
+  const cutoff = Date.now() - 8 * 60 * 60 * 1000;
+  for (const [sid, s] of sessions) {
+    if (s.createdAt < cutoff) sessions.delete(sid);
+  }
   return id;
 }
 
@@ -156,7 +166,7 @@ function startFfmpeg() {
     "-flags",
     "low_delay",
     "-i",
-    UDP_URL,
+    SRT_URL,
     "-map",
     "0:v:0",
     "-map",
@@ -225,11 +235,52 @@ function stopFfmpeg() {
 }
 
 // ---------------------------------------------------------------------------
+// Login rate limiter (in-memory, no dependency)
+// Max 10 attempts per IP per 15 minutes
+// ---------------------------------------------------------------------------
+const loginAttempts = new Map();
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_MAX = 10;
+
+function rateLimitLogin(req, res, next) {
+  const ip =
+    req.headers["x-forwarded-for"]?.split(",")[0].trim() ??
+    req.socket.remoteAddress;
+  const now = Date.now();
+  const entry = loginAttempts.get(ip) ?? { count: 0, windowStart: now };
+
+  if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+
+  entry.count++;
+  loginAttempts.set(ip, entry);
+
+  // Prune stale IPs every 100 entries
+  if (loginAttempts.size % 100 === 0) {
+    for (const [k, v] of loginAttempts) {
+      if (now - v.windowStart > RATE_LIMIT_WINDOW_MS) loginAttempts.delete(k);
+    }
+  }
+
+  if (entry.count > RATE_LIMIT_MAX) {
+    const retryAfter = Math.ceil(
+      (RATE_LIMIT_WINDOW_MS - (now - entry.windowStart)) / 1000,
+    );
+    res.setHeader("Retry-After", retryAfter);
+    return res.status(429).send("Too many login attempts. Try again later.");
+  }
+
+  next();
+}
+
+// ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
 app.use(parseCookies);
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: false, limit: "1kb" }));
+app.use(express.json({ limit: "1kb" }));
 
 // ---------------------------------------------------------------------------
 // Admin routes
@@ -240,7 +291,7 @@ app.get("/admin/login", (req, res) => {
   res.sendFile(path.join(PUBLIC, "login.html"));
 });
 
-app.post("/admin/login", (req, res) => {
+app.post("/admin/login", rateLimitLogin, (req, res) => {
   if (req.body.password !== ADMIN_PASSWORD) {
     return res.redirect(
       "/admin/login?error=" + encodeURIComponent("Incorrect password."),
@@ -312,7 +363,7 @@ app.get("/health", (req, res) => {
     ok: true,
     ffmpegRunning: Boolean(ffmpegChild),
     streamActive: streamToken !== null,
-    udpUrl: UDP_URL,
+    srtUrl: SRT_URL,
     videoMode: VIDEO_MODE,
   });
 });
@@ -321,6 +372,8 @@ app.get("/health", (req, res) => {
 // Start
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, HOST, () => {
+  console.log(`Listening on http://${HOST}:${PORT}`);
+  console.log(`Admin panel:  http://${HOST}:${PORT}/admin`);
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
 });
