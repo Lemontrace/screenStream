@@ -155,7 +155,6 @@
     .copy-btn:hover { color: #bbb; }
     .copy-btn.ok { color: #4ade80; border-color: #1a3d2a; }
 
-    .token-text { font-size: 0.76rem; color: #888; font-family: ui-monospace, monospace; }
 
     .toast { margin-top: 0.9rem; font-size: 0.8rem; min-height: 1.2em; color: #4ade80; }
     .toast.error { color: #f87171; }
@@ -252,24 +251,10 @@
 
           <div class="info-block" id="infoBlock">
             <div class="info-row">
-              <div class="info-label">Player URL — share this link</div>
-              <div class="info-value">
-                <a class="info-text" id="playerUrl" href="#" target="_blank"></a>
-                <button class="copy-btn" data-copy="playerUrl">Copy</button>
-              </div>
-            </div>
-            <div class="info-row">
               <div class="info-label">HLS URL — for VLC / OBS</div>
               <div class="info-value">
                 <span class="info-text" id="hlsUrl"></span>
                 <button class="copy-btn" data-copy="hlsUrl">Copy</button>
-              </div>
-            </div>
-            <div class="info-row">
-              <div class="info-label">Stream Token</div>
-              <div class="info-value">
-                <span class="info-text token-text" id="tokenVal"></span>
-                <button class="copy-btn" data-copy="tokenVal">Copy</button>
               </div>
             </div>
           </div>
@@ -408,7 +393,7 @@
     });
 
     // ── Status / render ───────────────────────────────────────────────────
-    function render({ running, token, playerUrl, hlsUrl }) {
+    function render({ running, token, hlsUrl }) {
       document.getElementById("dot").className = "dot" + (running ? " live" : "");
       document.getElementById("statusLabel").innerHTML =
         `Stream is <strong>${running ? "LIVE" : "OFFLINE"}</strong>`;
@@ -418,11 +403,7 @@
       const block = document.getElementById("infoBlock");
       if (running && token) {
         block.classList.add("visible");
-        const pEl = document.getElementById("playerUrl");
-        pEl.href = origin + playerUrl;
-        pEl.textContent = origin + playerUrl;
         document.getElementById("hlsUrl").textContent = origin + hlsUrl;
-        document.getElementById("tokenVal").textContent = token;
         loadPreview(origin + hlsUrl);
       } else {
         block.classList.remove("visible");
@@ -450,7 +431,7 @@
       try {
         const r = await fetch("/admin/start", { method: "POST" });
         const d = await r.json();
-        if (d.ok) { toast("Stream started — new token generated."); await refresh(); }
+        if (d.ok) { toast("Stream started."); await refresh(); }
         else toast(d.error || "Failed to start.", true);
       } catch { toast("Request failed.", true); }
       await refresh();
@@ -473,14 +454,37 @@
     });
 
     // Copy buttons
+    function copyToClipboard(text) {
+      if (navigator.clipboard?.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        return Promise.resolve();
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+
     document.querySelectorAll(".copy-btn[data-copy]").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const el = document.getElementById(btn.dataset.copy);
-        navigator.clipboard.writeText(el.href || el.textContent).then(() => {
+        const text = (el.href !== undefined && el.href !== "" ? el.href : null) ?? el.textContent?.trim() ?? "";
+        if (!text) return;
+        try {
+          await copyToClipboard(text);
           btn.textContent = "✓";
           btn.classList.add("ok");
           setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("ok"); }, 1500);
-        });
+        } catch {
+          toast("Copy failed. Try selecting the text manually.", true);
+        }
       });
     });
 

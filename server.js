@@ -47,9 +47,6 @@ function generateToken() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-function playerPath(token) {
-  return `/${token}/player`;
-}
 function hlsBasePath(token) {
   return `/${token}/hls`;
 }
@@ -274,7 +271,6 @@ app.get("/admin/status", requireAuth, (req, res) => {
   res.json({
     running: Boolean(ffmpegChild),
     token: streamToken,
-    playerUrl: streamToken ? playerPath(streamToken) : null,
     hlsUrl: streamToken ? `${hlsBasePath(streamToken)}/${PLAYLIST}` : null,
   });
 });
@@ -306,12 +302,6 @@ app.use((req, res, next) => {
   if (!req.path.startsWith(base + "/")) return next();
   req.url = req.path.slice(base.length);
   express.static(HLS_DIR, { etag: false })(req, res, next);
-});
-
-// Player page — only served when token matches
-app.get("/:token/player", (req, res, next) => {
-  if (!streamToken || req.params.token !== streamToken) return next();
-  res.sendFile(path.join(PUBLIC, "player.html"));
 });
 
 // ---------------------------------------------------------------------------
