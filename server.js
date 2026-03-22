@@ -396,18 +396,13 @@ try {
   process.exit(1);
 }
 
-const adminServer = https
-  .createServer(tlsOptions, app)
-  .listen(PORT, HOST, () => {
-    console.log(`HTTPS: https://${HOST}:${PORT}/admin`);
-  });
+const adminServer = https.createServer(tlsOptions, app).listen(PORT, HOST);
 
 // Minimal HTTP app — HLS segments only, no admin routes
 const hlsApp = express();
 hlsApp.use(hlsMiddleware);
 
 const hlsServer = http.createServer(hlsApp).listen(HLS_PORT, HOST, () => {
-  console.log(`HTTP:  http://${HOST}:${HLS_PORT}`);
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
 });
