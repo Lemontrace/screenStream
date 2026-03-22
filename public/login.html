@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stream Admin — Login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: #141414;
+      border: 1px solid #232323;
+      border-radius: 10px;
+      padding: 2.25rem 2rem;
+      width: 100%;
+      max-width: 360px;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.5);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 1.75rem;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: #2563eb;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+    }
+
+    .logo-text {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    label {
+      display: block;
+      font-size: 0.75rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 0.4rem;
+    }
+
+    input[type="password"] {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      background: #0f0f0f;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 0.95rem;
+      outline: none;
+      margin-bottom: 1.1rem;
+      transition: border-color 0.15s;
+    }
+
+    input[type="password"]:focus {
+      border-color: #3b82f6;
+    }
+
+    button[type="submit"] {
+      width: 100%;
+      padding: 0.65rem;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button[type="submit"]:hover {
+      background: #1d4ed8;
+    }
+
+    .error {
+      background: #2d1515;
+      border: 1px solid #5c2323;
+      color: #f87171;
+      font-size: 0.82rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 5px;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="logo-icon">▶</div>
+      <span class="logo-text">Stream Admin</span>
+    </div>
+
+    <!-- Error injected server-side via query param -->
+    <div class="error" id="errorBox" style="display:none"></div>
+
+    <form method="POST" action="/admin/login">
+      <label for="password">Password</label>
+      <input
+        type="password"
+        id="password"
+        name="password"
+        autofocus
+        autocomplete="current-password"
+        placeholder="••••••••"
+      >
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const err = params.get("error");
+    if (err) {
+      const box = document.getElementById("errorBox");
+      box.textContent = decodeURIComponent(err);
+      box.style.display = "block";
+    }
+  </script>
+</body>
+</html>
