@@ -359,12 +359,13 @@
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
+          destroyHls();
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Stream may have just started; retry quietly
-            setTimeout(() => { if (currentHls === hlsUrl) hls?.startLoad(); }, 2000);
+            // Segments not ready yet — keep retrying until they appear
+            setTimeout(() => loadPreview(hlsUrl), 2000);
           } else {
-            destroyHls();
             showOffline("Playback error — will retry.");
+            setTimeout(() => loadPreview(hlsUrl), 5000);
           }
         }
       });

@@ -321,8 +321,6 @@ app.get("/health", (req, res) => {
 // Start
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, HOST, () => {
-  console.log(`Listening on http://${HOST}:${PORT}`);
-  console.log(`Admin panel:  http://${HOST}:${PORT}/admin`);
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
 });
