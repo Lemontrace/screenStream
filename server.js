@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import http from "node:http";
+import https from "node:https";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -6,14 +8,24 @@ import process from "node:process";
 import express from "express";
 import "dotenv/config";
 
-const app = express();
+const app = express(); // HTTPS — admin only
+const hlsApp = express(); // HTTP  — public HLS segments
 
 const PORT = Number(process.env.PORT || 7777);
 const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC = path.join(process.cwd(), "public");
+const HLS_PORT = Number(process.env.HLS_PORT || 7778); // plain HTTP, public
 
 // Admin auth — always override ADMIN_PASSWORD via env in production
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) {
+  console.error("[error] ADMIN_PASSWORD is not set");
+  process.exit(1);
+}
+
+// TLS — paths to self-signed cert and key (generate with openssl, see README)
+const TLS_CERT = process.env.TLS_CERT || "cert.pem";
+const TLS_KEY = process.env.TLS_KEY || "key.pem";
 
 // SRT input from OBS
 // Set SRT_PASSPHRASE in .env — without it the stream is unauthenticated
@@ -300,7 +312,7 @@ app.post("/admin/login", rateLimitLogin, (req, res) => {
   const sid = createSession();
   res.setHeader(
     "Set-Cookie",
-    `session=${sid}; HttpOnly; SameSite=Strict; Path=/`,
+    `session=${sid}; HttpOnly; Secure; SameSite=Strict; Path=/`,
   );
   res.redirect("/admin");
 });
@@ -323,6 +335,7 @@ app.get("/admin/status", requireAuth, (req, res) => {
     running: Boolean(ffmpegChild),
     token: streamToken,
     hlsUrl: streamToken ? `${hlsBasePath(streamToken)}/${PLAYLIST}` : null,
+    hlsPort: HLS_PORT,
   });
 });
 
@@ -343,11 +356,11 @@ app.post("/admin/stop", requireAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Public stream routes (token-gated, dynamic)
+// Public stream routes — served on plain HTTP (hlsApp)
 // ---------------------------------------------------------------------------
 
 // HLS segments — only served when token matches
-app.use((req, res, next) => {
+hlsApp.use((req, res, next) => {
   if (!streamToken) return next();
   const base = hlsBasePath(streamToken);
   if (!req.path.startsWith(base + "/")) return next();
@@ -356,14 +369,13 @@ app.use((req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// Health
+// Health (on HTTP server — no auth needed)
 // ---------------------------------------------------------------------------
-app.get("/health", (req, res) => {
+hlsApp.get("/health", (req, res) => {
   res.json({
     ok: true,
     ffmpegRunning: Boolean(ffmpegChild),
     streamActive: streamToken !== null,
-    srtUrl: SRT_URL,
     videoMode: VIDEO_MODE,
   });
 });
@@ -371,9 +383,28 @@ app.get("/health", (req, res) => {
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
-const server = app.listen(PORT, HOST, () => {
-  console.log(`Listening on http://${HOST}:${PORT}`);
-  console.log(`Admin panel:  http://${HOST}:${PORT}/admin`);
+let tlsOptions;
+try {
+  tlsOptions = {
+    cert: fs.readFileSync(TLS_CERT),
+    key: fs.readFileSync(TLS_KEY),
+  };
+} catch (err) {
+  console.error(`[tls] Failed to load cert/key: ${err.message}`);
+  console.error(
+    `[tls] Generate with: openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"`,
+  );
+  process.exit(1);
+}
+
+const adminServer = https
+  .createServer(tlsOptions, app)
+  .listen(PORT, HOST, () => {
+    console.log(`Admin (HTTPS): https://${HOST}:${PORT}/admin`);
+  });
+
+const hlsServer = http.createServer(hlsApp).listen(HLS_PORT, HOST, () => {
+  console.log(`HLS   (HTTP):  http://${HOST}:${HLS_PORT}`);
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
 });
@@ -383,7 +414,8 @@ function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("Shutting down…");
-  server.close(() => process.exit(0));
+  adminServer.close();
+  hlsServer.close(() => process.exit(0));
   stopFfmpeg();
 }
 

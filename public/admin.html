@@ -309,10 +309,10 @@
 
   <script>
     const origin = location.origin;
-    let pollTimer   = null;
-    let hls         = null;
-    let currentHls  = null;   // the HLS URL currently loaded
-    let muted       = true;
+    let pollTimer      = null;
+    let hls            = null;
+    let currentHls     = null;
+    let muted          = true;
     let previewEnabled = true;
 
     // ── Toast ──────────────────────────────────────────────────────────────
@@ -377,7 +377,6 @@
         if (data.fatal) {
           destroyHls();
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Segments not ready yet — keep retrying until they appear
             setTimeout(() => loadPreview(hlsUrl), 2000);
           } else {
             showOffline("Playback error — will retry.");
@@ -424,7 +423,8 @@
     });
 
     // ── Status / render ───────────────────────────────────────────────────
-    function render({ running, token, hlsUrl }) {
+    function render({ running, token, hlsUrl, hlsPort }) {
+      const hlsOrigin = hlsPort ? `http://${location.hostname}:${hlsPort}` : origin;
       document.getElementById("dot").className = "dot" + (running ? " live" : "");
       document.getElementById("statusLabel").innerHTML =
         `Stream is <strong>${running ? "LIVE" : "OFFLINE"}</strong>`;
@@ -434,8 +434,8 @@
       const block = document.getElementById("infoBlock");
       if (running && token) {
         block.classList.add("visible");
-        document.getElementById("hlsUrl").textContent = origin + hlsUrl;
-        loadPreview(origin + hlsUrl);
+        document.getElementById("hlsUrl").textContent = hlsOrigin + hlsUrl;
+        loadPreview(hlsOrigin + hlsUrl);
         if (!previewEnabled) { destroyHls(); showOffline("Preview disabled."); }
       } else {
         block.classList.remove("visible");
