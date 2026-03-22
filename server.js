@@ -7,8 +7,8 @@ import express from "express";
 
 const app = express();
 
-const PORT   = Number(process.env.PORT || 7777);
-const HOST   = process.env.HOST || "0.0.0.0";
+const PORT = Number(process.env.PORT || 7777);
+const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC = path.join(process.cwd(), "public");
 
 // Admin auth — always override ADMIN_PASSWORD via env in production
@@ -20,16 +20,18 @@ const UDP_URL =
   "udp://0.0.0.0:5555?fifo_size=1000000&overrun_nonfatal=1";
 
 // HLS output
-const HLS_DIR  = process.env.HLS_DIR || path.join(PUBLIC, "hls");
+const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
 const PLAYLIST = process.env.PLAYLIST || "index.m3u8";
 
 // HLS tuning
-const HLS_TIME     = process.env.HLS_TIME      || "1";
-const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "6";
+const HLS_TIME = process.env.HLS_TIME || "2";
+const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "3";
 
 // Segment cleanup
-const HLS_MAX_SEGMENTS    = Number(process.env.HLS_MAX_SEGMENTS    || "60");
-const HLS_CLEAN_INTERVAL_MS = Number(process.env.HLS_CLEAN_INTERVAL_MS || "15000");
+const HLS_MAX_SEGMENTS = Number(process.env.HLS_MAX_SEGMENTS || "60");
+const HLS_CLEAN_INTERVAL_MS = Number(
+  process.env.HLS_CLEAN_INTERVAL_MS || "15000",
+);
 
 // Video mode
 const VIDEO_MODE = process.env.VIDEO_MODE || "copy"; // "copy" | "encode"
@@ -37,15 +39,19 @@ const VIDEO_MODE = process.env.VIDEO_MODE || "copy"; // "copy" | "encode"
 // ---------------------------------------------------------------------------
 // Stream state
 // ---------------------------------------------------------------------------
-let streamToken = null;   // null = stopped; hex string = live
+let streamToken = null; // null = stopped; hex string = live
 let ffmpegChild = null;
 
 function generateToken() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-function playerPath(token)  { return `/${token}/player`; }
-function hlsBasePath(token) { return `/${token}/hls`; }
+function playerPath(token) {
+  return `/${token}/player`;
+}
+function hlsBasePath(token) {
+  return `/${token}/hls`;
+}
 
 // ---------------------------------------------------------------------------
 // Session store (in-memory, single-user)
@@ -58,9 +64,20 @@ function createSession() {
   return id;
 }
 
+function isValidSession(id) {
+  const session = sessions.get(id);
+  if (!session) return false;
+  // expire after 8 hours
+  if (Date.now() - session.createdAt > 8 * 60 * 60 * 1000) {
+    sessions.delete(id);
+    return false;
+  }
+  return true;
+}
+
 function requireAuth(req, res, next) {
   const sid = req.cookies?.session;
-  if (sid && sessions.has(sid)) return next();
+  if (sid && isValidSession(sid)) return next();
   res.redirect("/admin/login");
 }
 
@@ -90,9 +107,15 @@ function clearSegmentsOnStart() {
   try {
     for (const name of fs.readdirSync(HLS_DIR)) {
       if (!name.endsWith(".ts") && name !== PLAYLIST) continue;
-      try { fs.unlinkSync(path.join(HLS_DIR, name)); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(path.join(HLS_DIR, name));
+      } catch {
+        /* ignore */
+      }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function cleanupOldSegments() {
@@ -104,13 +127,20 @@ function cleanupOldSegments() {
     const withStats = tsFiles
       .map((name) => {
         const full = path.join(HLS_DIR, name);
-        try { return { full, mtimeMs: fs.statSync(full).mtimeMs }; }
-        catch { return null; }
+        try {
+          return { full, mtimeMs: fs.statSync(full).mtimeMs };
+        } catch {
+          return null;
+        }
       })
       .filter(Boolean)
       .sort((a, b) => a.mtimeMs - b.mtimeMs);
     for (const f of withStats.slice(0, withStats.length - HLS_MAX_SEGMENTS)) {
-      try { fs.unlinkSync(f.full); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(f.full);
+      } catch {
+        /* ignore */
+      }
     }
   });
 }
@@ -121,39 +151,70 @@ function startFfmpeg() {
 
   const inputArgs = [
     "-hide_banner",
-    "-loglevel", "warning",
-    "-fflags", "nobuffer",
-    "-flags", "low_delay",
-    "-i", UDP_URL,
-    "-map", "0:v:0",
-    "-map", "0:a:0",
+    "-loglevel",
+    "warning",
+    "-fflags",
+    "nobuffer",
+    "-flags",
+    "low_delay",
+    "-i",
+    UDP_URL,
+    "-map",
+    "0:v:0",
+    "-map",
+    "0:a:0",
   ];
 
   const videoArgs =
     VIDEO_MODE === "encode"
-      ? ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
-         "-pix_fmt", "yuv420p", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0"]
+      ? [
+          "-c:v",
+          "libx264",
+          "-preset",
+          "veryfast",
+          "-tune",
+          "zerolatency",
+          "-pix_fmt",
+          "yuv420p",
+          "-g",
+          "60",
+          "-keyint_min",
+          "60",
+          "-sc_threshold",
+          "0",
+        ]
       : ["-c:v", "copy"];
 
   const audioArgs = ["-c:a", "aac", "-b:a", "256k"];
 
   const outputArgs = [
-    "-f", "hls",
-    "-hls_time", String(HLS_TIME),
-    "-hls_list_size", String(HLS_LIST_SIZE),
-    "-hls_flags", "delete_segments+append_list+independent_segments",
-    "-hls_segment_filename", path.join(HLS_DIR, "seg_%06d.ts"),
+    "-f",
+    "hls",
+    "-hls_time",
+    String(HLS_TIME),
+    "-hls_list_size",
+    String(HLS_LIST_SIZE),
+    "-hls_flags",
+    "delete_segments+append_list+independent_segments",
+    "-hls_segment_filename",
+    path.join(HLS_DIR, "seg_%06d.ts"),
     path.join(HLS_DIR, PLAYLIST),
   ];
 
-  ffmpegChild = spawn("ffmpeg", [...inputArgs, ...videoArgs, ...audioArgs, ...outputArgs], {
-    stdio: ["ignore", "inherit", "inherit"],
-  });
+  ffmpegChild = spawn(
+    "ffmpeg",
+    [...inputArgs, ...videoArgs, ...audioArgs, ...outputArgs],
+    {
+      stdio: ["ignore", "inherit", "inherit"],
+    },
+  );
 
   ffmpegChild.on("exit", (code, signal) => {
     ffmpegChild = null;
     if (shuttingDown || streamToken === null) return;
-    console.error(`[ffmpeg] exited (code=${code}, signal=${signal}), restarting in 1s`);
+    console.error(
+      `[ffmpeg] exited (code=${code}, signal=${signal}), restarting in 1s`,
+    );
     setTimeout(startFfmpeg, 1000);
   });
 }
@@ -176,23 +237,31 @@ app.use(express.json());
 // Admin routes
 // ---------------------------------------------------------------------------
 app.get("/admin/login", (req, res) => {
-  if (req.cookies?.session && sessions.has(req.cookies.session))
+  if (req.cookies?.session && isValidSession(req.cookies.session))
     return res.redirect("/admin");
   res.sendFile(path.join(PUBLIC, "login.html"));
 });
 
 app.post("/admin/login", (req, res) => {
   if (req.body.password !== ADMIN_PASSWORD) {
-    return res.redirect("/admin/login?error=" + encodeURIComponent("Incorrect password."));
+    return res.redirect(
+      "/admin/login?error=" + encodeURIComponent("Incorrect password."),
+    );
   }
   const sid = createSession();
-  res.setHeader("Set-Cookie", `session=${sid}; HttpOnly; SameSite=Strict; Path=/`);
+  res.setHeader(
+    "Set-Cookie",
+    `session=${sid}; HttpOnly; SameSite=Strict; Path=/`,
+  );
   res.redirect("/admin");
 });
 
 app.post("/admin/logout", (req, res) => {
   sessions.delete(req.cookies?.session);
-  res.setHeader("Set-Cookie", "session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+  res.setHeader(
+    "Set-Cookie",
+    "session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+  );
   res.redirect("/admin/login");
 });
 
@@ -202,10 +271,10 @@ app.get("/admin", requireAuth, (req, res) => {
 
 app.get("/admin/status", requireAuth, (req, res) => {
   res.json({
-    running:   Boolean(ffmpegChild),
-    token:     streamToken,
-    playerUrl: streamToken ? playerPath(streamToken)                    : null,
-    hlsUrl:    streamToken ? `${hlsBasePath(streamToken)}/${PLAYLIST}`  : null,
+    running: Boolean(ffmpegChild),
+    token: streamToken,
+    playerUrl: streamToken ? playerPath(streamToken) : null,
+    hlsUrl: streamToken ? `${hlsBasePath(streamToken)}/${PLAYLIST}` : null,
   });
 });
 
@@ -249,11 +318,11 @@ app.get("/:token/player", (req, res, next) => {
 // ---------------------------------------------------------------------------
 app.get("/health", (req, res) => {
   res.json({
-    ok:           true,
+    ok: true,
     ffmpegRunning: Boolean(ffmpegChild),
-    streamActive:  streamToken !== null,
-    udpUrl:        UDP_URL,
-    videoMode:     VIDEO_MODE,
+    streamActive: streamToken !== null,
+    udpUrl: UDP_URL,
+    videoMode: VIDEO_MODE,
   });
 });
 
@@ -263,7 +332,8 @@ app.get("/health", (req, res) => {
 const server = app.listen(PORT, HOST, () => {
   console.log(`Listening on http://${HOST}:${PORT}`);
   console.log(`Admin panel:  http://${HOST}:${PORT}/admin`);
-  if (HLS_CLEAN_INTERVAL_MS > 0) setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
+  if (HLS_CLEAN_INTERVAL_MS > 0)
+    setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
 });
 
 let shuttingDown = false;
@@ -275,5 +345,5 @@ function shutdown() {
   stopFfmpeg();
 }
 
-process.on("SIGINT",  shutdown);
+process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
