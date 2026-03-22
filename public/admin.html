@@ -582,10 +582,7 @@
       });
 
       // ── Status / render ───────────────────────────────────────────────────
-      function render({ running, token, hlsUrl, hlsPort, previewUrl }) {
-        const hlsOrigin = hlsPort
-          ? `http://${location.hostname}:${hlsPort}`
-          : origin;
+      function render({ running, token, hlsHttpUrl, hlsHttpsUrl }) {
         document.getElementById("dot").className =
           "dot" + (running ? " live" : "");
         document.getElementById("statusLabel").innerHTML =
@@ -596,9 +593,8 @@
         const block = document.getElementById("infoBlock");
         if (running && token) {
           block.classList.add("visible");
-          document.getElementById("hlsUrl").textContent = hlsOrigin + hlsUrl;
-          // Use the HTTPS proxy URL for preview to avoid mixed content
-          loadPreview(previewUrl ? origin + previewUrl : hlsOrigin + hlsUrl);
+          document.getElementById("hlsUrl").textContent = hlsHttpUrl;
+          loadPreview(hlsHttpsUrl);
           if (!previewEnabled) {
             destroyHls();
             showOffline("Preview disabled.");
