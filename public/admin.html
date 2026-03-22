@@ -221,6 +221,18 @@
       cursor: pointer; transition: color 0.15s;
     }
     .mute-btn:hover { color: #aaa; }
+
+    .toggle-preview-btn {
+      background: none;
+      border: 1px solid #2a2a2a;
+      border-radius: 5px;
+      color: #555; font-size: 0.68rem;
+      padding: 0.2rem 0.6rem;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .toggle-preview-btn:hover { color: #999; border-color: #444; }
+    .toggle-preview-btn.disabled-state { color: #4ade80; border-color: #1e4a28; }
   </style>
 </head>
 <body>
@@ -271,7 +283,10 @@
 
         <div class="preview-header">
           <span class="preview-title">Live Preview</span>
-          <span class="preview-badge" id="previewBadge">Offline</span>
+          <div style="display:flex;align-items:center;gap:0.6rem">
+            <button class="toggle-preview-btn" id="togglePreviewBtn">Disable</button>
+            <span class="preview-badge" id="previewBadge">Offline</span>
+          </div>
         </div>
 
         <div class="video-wrapper">
@@ -298,6 +313,7 @@
     let hls         = null;
     let currentHls  = null;   // the HLS URL currently loaded
     let muted       = true;
+    let previewEnabled = true;
 
     // ── Toast ──────────────────────────────────────────────────────────────
     function toast(msg, isError = false) {
@@ -385,6 +401,20 @@
       segInfo.textContent = "—";
     }
 
+    // Toggle preview
+    const togglePreviewBtn = document.getElementById("togglePreviewBtn");
+    togglePreviewBtn.addEventListener("click", () => {
+      previewEnabled = !previewEnabled;
+      togglePreviewBtn.textContent = previewEnabled ? "Disable" : "Enable";
+      togglePreviewBtn.classList.toggle("disabled-state", !previewEnabled);
+      if (!previewEnabled) {
+        destroyHls();
+        showOffline("Preview disabled.");
+      } else {
+        refresh();
+      }
+    });
+
     // Mute toggle
     const muteBtn = document.getElementById("muteBtn");
     muteBtn.addEventListener("click", () => {
@@ -406,6 +436,7 @@
         block.classList.add("visible");
         document.getElementById("hlsUrl").textContent = origin + hlsUrl;
         loadPreview(origin + hlsUrl);
+        if (!previewEnabled) { destroyHls(); showOffline("Preview disabled."); }
       } else {
         block.classList.remove("visible");
         destroyHls();
