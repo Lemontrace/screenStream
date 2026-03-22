@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import express from "express";
+import "dotenv/config";
 
 const app = express();
 
