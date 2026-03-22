@@ -8,13 +8,12 @@ import process from "node:process";
 import express from "express";
 import "dotenv/config";
 
-const app = express(); // HTTPS — admin only
-const hlsApp = express(); // HTTP  — public HLS segments
+const app = express();
 
 const PORT = Number(process.env.PORT || 7777);
 const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC = path.join(process.cwd(), "public");
-const HLS_PORT = Number(process.env.HLS_PORT || 7778); // plain HTTP, public
+const HLS_PORT = Number(process.env.HLS_PORT || 7778); // plain HTTP
 
 // Admin auth — always override ADMIN_PASSWORD via env in production
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -335,7 +334,6 @@ app.get("/admin/status", requireAuth, (req, res) => {
     running: Boolean(ffmpegChild),
     token: streamToken,
     hlsUrl: streamToken ? `${hlsBasePath(streamToken)}/${PLAYLIST}` : null,
-    hlsPort: HLS_PORT,
   });
 });
 
@@ -356,22 +354,23 @@ app.post("/admin/stop", requireAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Public stream routes — served on plain HTTP (hlsApp)
+// Public stream routes — served on both HTTP and HTTPS
 // ---------------------------------------------------------------------------
 
-// HLS segments — only served when token matches
-hlsApp.use((req, res, next) => {
+function hlsMiddleware(req, res, next) {
   if (!streamToken) return next();
   const base = hlsBasePath(streamToken);
   if (!req.path.startsWith(base + "/")) return next();
   req.url = req.path.slice(base.length);
   express.static(HLS_DIR, { etag: false })(req, res, next);
-});
+}
+
+app.use(hlsMiddleware);
 
 // ---------------------------------------------------------------------------
-// Health (on HTTP server — no auth needed)
+// Health
 // ---------------------------------------------------------------------------
-hlsApp.get("/health", (req, res) => {
+app.get("/health", (req, res) => {
   res.json({
     ok: true,
     ffmpegRunning: Boolean(ffmpegChild),
@@ -400,11 +399,15 @@ try {
 const adminServer = https
   .createServer(tlsOptions, app)
   .listen(PORT, HOST, () => {
-    console.log(`Admin (HTTPS): https://${HOST}:${PORT}/admin`);
+    console.log(`HTTPS: https://${HOST}:${PORT}/admin`);
   });
 
+// Minimal HTTP app — HLS segments only, no admin routes
+const hlsApp = express();
+hlsApp.use(hlsMiddleware);
+
 const hlsServer = http.createServer(hlsApp).listen(HLS_PORT, HOST, () => {
-  console.log(`HLS   (HTTP):  http://${HOST}:${HLS_PORT}`);
+  console.log(`HTTP:  http://${HOST}:${HLS_PORT}`);
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
 });
