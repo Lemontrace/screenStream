@@ -330,10 +330,14 @@ app.get("/admin", requireAuth, (req, res) => {
 });
 
 app.get("/admin/status", requireAuth, (req, res) => {
+  const hlsPath = streamToken
+    ? `${hlsBasePath(streamToken)}/${PLAYLIST}`
+    : null;
   res.json({
     running: Boolean(ffmpegChild),
     token: streamToken,
-    hlsUrl: streamToken ? `${hlsBasePath(streamToken)}/${PLAYLIST}` : null,
+    hlsHttpUrl: hlsPath ? `http://${req.hostname}:${HLS_PORT}${hlsPath}` : null,
+    hlsHttpsUrl: hlsPath ? `https://${req.hostname}:${PORT}${hlsPath}` : null,
   });
 });
 

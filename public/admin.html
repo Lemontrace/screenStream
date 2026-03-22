@@ -1,528 +1,717 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stream Admin — Control</title>
-  <!-- hls.js for in-page preview -->
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stream Admin — Control</title>
+    <!-- hls.js for in-page preview -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      background: #0a0a0a;
-      color: #e0e0e0;
-      min-height: 100vh;
-      padding: 1.5rem;
-    }
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: #0a0a0a;
+        color: #e0e0e0;
+        min-height: 100vh;
+        padding: 1.5rem;
+      }
 
-    .layout {
-      display: grid;
-      grid-template-columns: 340px 1fr;
-      gap: 1.25rem;
-      max-width: 1100px;
-      margin: 0 auto;
-      align-items: start;
-    }
+      .layout {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 1.25rem;
+        max-width: 1100px;
+        margin: 0 auto;
+        align-items: start;
+      }
 
-    @media (max-width: 780px) {
-      .layout { grid-template-columns: 1fr; }
-      .preview-col { order: -1; }
-    }
+      @media (max-width: 780px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .preview-col {
+          order: -1;
+        }
+      }
 
-    /* ── Shared card ── */
-    .card {
-      background: #141414;
-      border: 1px solid #232323;
-      border-radius: 10px;
-      overflow: hidden;
-      box-shadow: 0 4px 32px rgba(0,0,0,0.5);
-    }
+      /* ── Shared card ── */
+      .card {
+        background: #141414;
+        border: 1px solid #232323;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 32px rgba(0, 0, 0, 0.5);
+      }
 
-    .card-body { padding: 1.5rem; }
+      .card-body {
+        padding: 1.5rem;
+      }
 
-    /* ── Header ── */
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 1.5rem;
-    }
+      /* ── Header ── */
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1.5rem;
+      }
 
-    .logo { display: flex; align-items: center; gap: 0.6rem; }
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
 
-    .logo-icon {
-      width: 30px; height: 30px;
-      background: #2563eb;
-      border-radius: 7px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.9rem;
-    }
+      .logo-icon {
+        width: 30px;
+        height: 30px;
+        background: #2563eb;
+        border-radius: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.9rem;
+      }
 
-    .logo-text { font-size: 0.95rem; font-weight: 600; color: #fff; }
+      .logo-text {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #fff;
+      }
 
-    .logout-btn {
-      background: none;
-      border: 1px solid #2a2a2a;
-      border-radius: 5px;
-      color: #555; font-size: 0.75rem;
-      padding: 0.3rem 0.7rem;
-      cursor: pointer;
-      transition: color 0.15s, border-color 0.15s;
-    }
-    .logout-btn:hover { color: #999; border-color: #444; }
+      .logout-btn {
+        background: none;
+        border: 1px solid #2a2a2a;
+        border-radius: 5px;
+        color: #555;
+        font-size: 0.75rem;
+        padding: 0.3rem 0.7rem;
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+      .logout-btn:hover {
+        color: #999;
+        border-color: #444;
+      }
 
-    /* ── Status ── */
-    .status-section {
-      background: #0f0f0f;
-      border: 1px solid #1e1e1e;
-      border-radius: 8px;
-      padding: 0.9rem 1.1rem;
-      margin-bottom: 1.1rem;
-      display: flex; align-items: center; gap: 0.75rem;
-    }
+      /* ── Status ── */
+      .status-section {
+        background: #0f0f0f;
+        border: 1px solid #1e1e1e;
+        border-radius: 8px;
+        padding: 0.9rem 1.1rem;
+        margin-bottom: 1.1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
 
-    .dot {
-      width: 11px; height: 11px;
-      border-radius: 50%;
-      background: #333; flex-shrink: 0;
-      transition: background 0.3s, box-shadow 0.3s;
-    }
-    .dot.live { background: #22c55e; box-shadow: 0 0 8px #22c55e99; }
+      .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #333;
+        flex-shrink: 0;
+        transition:
+          background 0.3s,
+          box-shadow 0.3s;
+      }
+      .dot.live {
+        background: #22c55e;
+        box-shadow: 0 0 8px #22c55e99;
+      }
 
-    .status-label { font-size: 0.88rem; color: #777; }
-    .status-label strong { color: #ccc; font-weight: 600; }
+      .status-label {
+        font-size: 0.88rem;
+        color: #777;
+      }
+      .status-label strong {
+        color: #ccc;
+        font-weight: 600;
+      }
 
-    /* ── Controls ── */
-    .controls { display: flex; gap: 0.75rem; margin-bottom: 1.1rem; }
+      /* ── Controls ── */
+      .controls {
+        display: flex;
+        gap: 0.75rem;
+        margin-bottom: 1.1rem;
+      }
 
-    .btn {
-      flex: 1; padding: 0.65rem 0.5rem;
-      border: none; border-radius: 6px;
-      font-size: 0.88rem; font-weight: 500;
-      cursor: pointer;
-      transition: background 0.15s, opacity 0.15s;
-    }
-    .btn:disabled { opacity: 0.35; cursor: default; }
+      .btn {
+        flex: 1;
+        padding: 0.65rem 0.5rem;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.88rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          opacity 0.15s;
+      }
+      .btn:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
 
-    .btn-start { background: #16a34a; color: #fff; }
-    .btn-start:hover:not(:disabled) { background: #15803d; }
-    .btn-stop  { background: #dc2626; color: #fff; }
-    .btn-stop:hover:not(:disabled)  { background: #b91c1c; }
+      .btn-start {
+        background: #16a34a;
+        color: #fff;
+      }
+      .btn-start:hover:not(:disabled) {
+        background: #15803d;
+      }
+      .btn-stop {
+        background: #dc2626;
+        color: #fff;
+      }
+      .btn-stop:hover:not(:disabled) {
+        background: #b91c1c;
+      }
 
-    /* ── Info block ── */
-    .info-block {
-      background: #0f0f0f;
-      border: 1px solid #1e1e1e;
-      border-radius: 8px;
-      padding: 1rem 1.1rem;
-      display: none;
-    }
-    .info-block.visible { display: block; }
+      /* ── Info block ── */
+      .info-block {
+        background: #0f0f0f;
+        border: 1px solid #1e1e1e;
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        display: none;
+      }
+      .info-block.visible {
+        display: block;
+      }
 
-    .info-row { margin-bottom: 0.85rem; }
-    .info-row:last-child { margin-bottom: 0; }
+      .info-row {
+        margin-bottom: 0.85rem;
+      }
+      .info-row:last-child {
+        margin-bottom: 0;
+      }
 
-    .info-label {
-      font-size: 0.68rem; color: #555;
-      text-transform: uppercase; letter-spacing: 0.07em;
-      margin-bottom: 0.3rem;
-    }
+      .info-label {
+        font-size: 0.68rem;
+        color: #555;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        margin-bottom: 0.3rem;
+      }
 
-    .info-value {
-      display: flex; align-items: center; gap: 0.5rem;
-      background: #0a0a0a;
-      border: 1px solid #1e1e1e;
-      border-radius: 5px;
-      padding: 0.4rem 0.6rem;
-    }
+      .info-value {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: #0a0a0a;
+        border: 1px solid #1e1e1e;
+        border-radius: 5px;
+        padding: 0.4rem 0.6rem;
+      }
 
-    .info-text {
-      flex: 1; font-size: 0.78rem; color: #60a5fa;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      text-decoration: none;
-    }
-    a.info-text:hover { text-decoration: underline; }
+      .info-text {
+        flex: 1;
+        font-size: 0.78rem;
+        color: #60a5fa;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-decoration: none;
+      }
+      a.info-text:hover {
+        text-decoration: underline;
+      }
 
-    .copy-btn {
-      flex-shrink: 0;
-      background: #1a1a1a; border: 1px solid #2e2e2e;
-      border-radius: 4px; color: #777;
-      font-size: 0.68rem; padding: 0.2rem 0.5rem;
-      cursor: pointer; transition: color 0.1s;
-    }
-    .copy-btn:hover { color: #bbb; }
-    .copy-btn.ok { color: #4ade80; border-color: #1a3d2a; }
+      .copy-btn {
+        flex-shrink: 0;
+        background: #1a1a1a;
+        border: 1px solid #2e2e2e;
+        border-radius: 4px;
+        color: #777;
+        font-size: 0.68rem;
+        padding: 0.2rem 0.5rem;
+        cursor: pointer;
+        transition: color 0.1s;
+      }
+      .copy-btn:hover {
+        color: #bbb;
+      }
+      .copy-btn.ok {
+        color: #4ade80;
+        border-color: #1a3d2a;
+      }
 
+      .toast {
+        margin-top: 0.9rem;
+        font-size: 0.8rem;
+        min-height: 1.2em;
+        color: #4ade80;
+      }
+      .toast.error {
+        color: #f87171;
+      }
 
-    .toast { margin-top: 0.9rem; font-size: 0.8rem; min-height: 1.2em; color: #4ade80; }
-    .toast.error { color: #f87171; }
+      /* ── Preview column ── */
+      .preview-col .card {
+        height: 100%;
+      }
 
-    /* ── Preview column ── */
-    .preview-col .card { height: 100%; }
+      .preview-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.9rem 1.25rem;
+        border-bottom: 1px solid #1e1e1e;
+      }
 
-    .preview-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0.9rem 1.25rem;
-      border-bottom: 1px solid #1e1e1e;
-    }
+      .preview-title {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+      }
 
-    .preview-title {
-      font-size: 0.8rem; font-weight: 600;
-      color: #888; text-transform: uppercase; letter-spacing: 0.07em;
-    }
+      .preview-badge {
+        font-size: 0.68rem;
+        padding: 0.15rem 0.55rem;
+        border-radius: 99px;
+        font-weight: 600;
+        background: #1a1a1a;
+        color: #555;
+        border: 1px solid #2a2a2a;
+      }
+      .preview-badge.live {
+        background: #14291a;
+        color: #4ade80;
+        border-color: #1e4a28;
+      }
 
-    .preview-badge {
-      font-size: 0.68rem; padding: 0.15rem 0.55rem;
-      border-radius: 99px; font-weight: 600;
-      background: #1a1a1a; color: #555; border: 1px solid #2a2a2a;
-    }
-    .preview-badge.live { background: #14291a; color: #4ade80; border-color: #1e4a28; }
+      .video-wrapper {
+        position: relative;
+        background: #000;
+        aspect-ratio: 16/9;
+      }
 
-    .video-wrapper {
-      position: relative;
-      background: #000;
-      aspect-ratio: 16/9;
-    }
+      video#preview {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: contain;
+      }
 
-    video#preview {
-      width: 100%; height: 100%;
-      display: block;
-      object-fit: contain;
-    }
+      .video-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+        background: #000;
+        color: #444;
+        font-size: 0.85rem;
+        transition: opacity 0.3s;
+      }
 
-    .video-overlay {
-      position: absolute; inset: 0;
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 0.6rem;
-      background: #000;
-      color: #444; font-size: 0.85rem;
-      transition: opacity 0.3s;
-    }
+      .video-overlay .overlay-icon {
+        font-size: 2rem;
+        opacity: 0.3;
+      }
+      .video-overlay.hidden {
+        display: none;
+      }
 
-    .video-overlay .overlay-icon { font-size: 2rem; opacity: 0.3; }
-    .video-overlay.hidden { display: none; }
+      .preview-footer {
+        padding: 0.75rem 1.25rem;
+        border-top: 1px solid #1a1a1a;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
 
-    .preview-footer {
-      padding: 0.75rem 1.25rem;
-      border-top: 1px solid #1a1a1a;
-      display: flex; align-items: center; justify-content: space-between;
-    }
+      .latency-info {
+        font-size: 0.72rem;
+        color: #444;
+      }
+      .latency-info span {
+        color: #666;
+      }
 
-    .latency-info { font-size: 0.72rem; color: #444; }
-    .latency-info span { color: #666; }
+      .mute-btn {
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 5px;
+        color: #666;
+        font-size: 0.72rem;
+        padding: 0.25rem 0.65rem;
+        cursor: pointer;
+        transition: color 0.15s;
+      }
+      .mute-btn:hover {
+        color: #aaa;
+      }
 
-    .mute-btn {
-      background: #1a1a1a; border: 1px solid #2a2a2a;
-      border-radius: 5px; color: #666;
-      font-size: 0.72rem; padding: 0.25rem 0.65rem;
-      cursor: pointer; transition: color 0.15s;
-    }
-    .mute-btn:hover { color: #aaa; }
-
-    .toggle-preview-btn {
-      background: none;
-      border: 1px solid #2a2a2a;
-      border-radius: 5px;
-      color: #555; font-size: 0.68rem;
-      padding: 0.2rem 0.6rem;
-      cursor: pointer;
-      transition: color 0.15s, border-color 0.15s;
-    }
-    .toggle-preview-btn:hover { color: #999; border-color: #444; }
-    .toggle-preview-btn.disabled-state { color: #4ade80; border-color: #1e4a28; }
-  </style>
-</head>
-<body>
-  <div class="layout">
-
-    <!-- ── Control panel ── -->
-    <div class="control-col">
-      <div class="card">
-        <div class="card-body">
-
-          <div class="header">
-            <div class="logo">
-              <div class="logo-icon">▶</div>
-              <span class="logo-text">Stream Admin</span>
+      .toggle-preview-btn {
+        background: none;
+        border: 1px solid #2a2a2a;
+        border-radius: 5px;
+        color: #555;
+        font-size: 0.68rem;
+        padding: 0.2rem 0.6rem;
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+      .toggle-preview-btn:hover {
+        color: #999;
+        border-color: #444;
+      }
+      .toggle-preview-btn.disabled-state {
+        color: #4ade80;
+        border-color: #1e4a28;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <!-- ── Control panel ── -->
+      <div class="control-col">
+        <div class="card">
+          <div class="card-body">
+            <div class="header">
+              <div class="logo">
+                <div class="logo-icon">▶</div>
+                <span class="logo-text">Stream Admin</span>
+              </div>
+              <button class="logout-btn" id="logoutBtn">Sign out</button>
             </div>
-            <button class="logout-btn" id="logoutBtn">Sign out</button>
-          </div>
 
-          <div class="status-section">
-            <div class="dot" id="dot"></div>
-            <div class="status-label" id="statusLabel">Checking…</div>
-          </div>
+            <div class="status-section">
+              <div class="dot" id="dot"></div>
+              <div class="status-label" id="statusLabel">Checking…</div>
+            </div>
 
-          <div class="controls">
-            <button class="btn btn-start" id="btnStart" disabled>▶ Start Stream</button>
-            <button class="btn btn-stop"  id="btnStop"  disabled>■ Stop Stream</button>
-          </div>
+            <div class="controls">
+              <button class="btn btn-start" id="btnStart" disabled>
+                ▶ Start Stream
+              </button>
+              <button class="btn btn-stop" id="btnStop" disabled>
+                ■ Stop Stream
+              </button>
+            </div>
 
-          <div class="info-block" id="infoBlock">
-            <div class="info-row">
-              <div class="info-label">HLS URL — for VLC / OBS</div>
-              <div class="info-value">
-                <span class="info-text" id="hlsUrl"></span>
-                <button class="copy-btn" data-copy="hlsUrl">Copy</button>
+            <div class="info-block" id="infoBlock">
+              <div class="info-row">
+                <div class="info-label">HLS URL — for VLC / OBS</div>
+                <div class="info-value">
+                  <span class="info-text" id="hlsUrl"></span>
+                  <button class="copy-btn" data-copy="hlsUrl">Copy</button>
+                </div>
               </div>
             </div>
+
+            <div class="toast" id="toast"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Preview panel ── -->
+      <div class="preview-col">
+        <div class="card">
+          <div class="preview-header">
+            <span class="preview-title">Live Preview</span>
+            <div style="display: flex; align-items: center; gap: 0.6rem">
+              <button class="toggle-preview-btn" id="togglePreviewBtn">
+                Disable
+              </button>
+              <span class="preview-badge" id="previewBadge">Offline</span>
+            </div>
           </div>
 
-          <div class="toast" id="toast"></div>
+          <div class="video-wrapper">
+            <video id="preview" autoplay playsinline></video>
+            <div class="video-overlay" id="videoOverlay">
+              <div class="overlay-icon">📡</div>
+              <div>Stream is offline</div>
+            </div>
+          </div>
 
+          <div class="preview-footer">
+            <span class="latency-info"
+              >HLS low-latency &nbsp;·&nbsp; <span id="segInfo">—</span></span
+            >
+            <button class="mute-btn" id="muteBtn">🔇 Muted</button>
+          </div>
         </div>
       </div>
     </div>
+    <!-- /.layout -->
 
-    <!-- ── Preview panel ── -->
-    <div class="preview-col">
-      <div class="card">
+    <script>
+      const origin = location.origin;
+      let pollTimer = null;
+      let hls = null;
+      let currentHls = null;
+      let muted = true;
+      let previewEnabled = true;
 
-        <div class="preview-header">
-          <span class="preview-title">Live Preview</span>
-          <div style="display:flex;align-items:center;gap:0.6rem">
-            <button class="toggle-preview-btn" id="togglePreviewBtn">Disable</button>
-            <span class="preview-badge" id="previewBadge">Offline</span>
-          </div>
-        </div>
-
-        <div class="video-wrapper">
-          <video id="preview" autoplay playsinline></video>
-          <div class="video-overlay" id="videoOverlay">
-            <div class="overlay-icon">📡</div>
-            <div>Stream is offline</div>
-          </div>
-        </div>
-
-        <div class="preview-footer">
-          <span class="latency-info">HLS low-latency &nbsp;·&nbsp; <span id="segInfo">—</span></span>
-          <button class="mute-btn" id="muteBtn">🔇 Muted</button>
-        </div>
-
-      </div>
-    </div>
-
-  </div><!-- /.layout -->
-
-  <script>
-    const origin = location.origin;
-    let pollTimer      = null;
-    let hls            = null;
-    let currentHls     = null;
-    let muted          = true;
-    let previewEnabled = true;
-
-    // ── Toast ──────────────────────────────────────────────────────────────
-    function toast(msg, isError = false) {
-      const el = document.getElementById("toast");
-      el.textContent = msg;
-      el.className = "toast" + (isError ? " error" : "");
-      clearTimeout(toast._t);
-      toast._t = setTimeout(() => { el.textContent = ""; el.className = "toast"; }, 4000);
-    }
-
-    // ── Preview / HLS.js ──────────────────────────────────────────────────
-    const video   = document.getElementById("preview");
-    const overlay = document.getElementById("videoOverlay");
-    const badge   = document.getElementById("previewBadge");
-    const segInfo = document.getElementById("segInfo");
-
-    function destroyHls() {
-      if (hls) { hls.destroy(); hls = null; }
-      currentHls = null;
-    }
-
-    function loadPreview(hlsUrl) {
-      if (currentHls === hlsUrl) return;   // already loaded
-      destroyHls();
-      currentHls = hlsUrl;
-
-      if (!Hls.isSupported() && video.canPlayType("application/vnd.apple.mpegurl")) {
-        // Native HLS (Safari)
-        video.src = hlsUrl;
-        video.play().catch(() => {});
-        showLive();
-        return;
+      // ── Toast ──────────────────────────────────────────────────────────────
+      function toast(msg, isError = false) {
+        const el = document.getElementById("toast");
+        el.textContent = msg;
+        el.className = "toast" + (isError ? " error" : "");
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => {
+          el.textContent = "";
+          el.className = "toast";
+        }, 4000);
       }
 
-      if (!Hls.isSupported()) {
-        showOffline("HLS not supported in this browser.");
-        return;
+      // ── Preview / HLS.js ──────────────────────────────────────────────────
+      const video = document.getElementById("preview");
+      const overlay = document.getElementById("videoOverlay");
+      const badge = document.getElementById("previewBadge");
+      const segInfo = document.getElementById("segInfo");
+
+      function destroyHls() {
+        if (hls) {
+          hls.destroy();
+          hls = null;
+        }
+        currentHls = null;
       }
 
-      hls = new Hls({
-        lowLatencyMode: true,
-        liveSyncDurationCount: 2,
-        liveMaxLatencyDurationCount: 4,
-      });
+      function loadPreview(hlsUrl) {
+        if (currentHls === hlsUrl) return; // already loaded
+        destroyHls();
+        currentHls = hlsUrl;
 
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(video);
+        if (
+          !Hls.isSupported() &&
+          video.canPlayType("application/vnd.apple.mpegurl")
+        ) {
+          // Native HLS (Safari)
+          video.src = hlsUrl;
+          video.play().catch(() => {});
+          showLive();
+          return;
+        }
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.muted = muted;
-        video.play().catch(() => {});
-        showLive();
-      });
+        if (!Hls.isSupported()) {
+          showOffline("HLS not supported in this browser.");
+          return;
+        }
 
-      hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
-        const kb = Math.round(data.frag.stats.total / 1024);
-        segInfo.textContent = `seg ${data.frag.sn} · ${kb} KB`;
-      });
+        hls = new Hls({
+          lowLatencyMode: true,
+          liveSyncDurationCount: 2,
+          liveMaxLatencyDurationCount: 4,
+        });
 
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          destroyHls();
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            setTimeout(() => loadPreview(hlsUrl), 2000);
-          } else {
-            showOffline("Playback error — will retry.");
-            setTimeout(() => loadPreview(hlsUrl), 5000);
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.muted = muted;
+          video.play().catch(() => {});
+          showLive();
+        });
+
+        hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
+          const kb = Math.round(data.frag.stats.total / 1024);
+          segInfo.textContent = `seg ${data.frag.sn} · ${kb} KB`;
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            destroyHls();
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              setTimeout(() => loadPreview(hlsUrl), 2000);
+            } else {
+              showOffline("Playback error — will retry.");
+              setTimeout(() => loadPreview(hlsUrl), 5000);
+            }
           }
+        });
+      }
+
+      function showLive() {
+        overlay.classList.add("hidden");
+        badge.textContent = "Live";
+        badge.classList.add("live");
+      }
+
+      function showOffline(msg = "Stream is offline") {
+        overlay.classList.remove("hidden");
+        overlay.querySelector("div:last-child").textContent = msg;
+        badge.textContent = "Offline";
+        badge.classList.remove("live");
+        segInfo.textContent = "—";
+      }
+
+      // Toggle preview
+      const togglePreviewBtn = document.getElementById("togglePreviewBtn");
+      togglePreviewBtn.addEventListener("click", () => {
+        previewEnabled = !previewEnabled;
+        togglePreviewBtn.textContent = previewEnabled ? "Disable" : "Enable";
+        togglePreviewBtn.classList.toggle("disabled-state", !previewEnabled);
+        if (!previewEnabled) {
+          destroyHls();
+          showOffline("Preview disabled.");
+        } else {
+          refresh();
         }
       });
-    }
 
-    function showLive() {
-      overlay.classList.add("hidden");
-      badge.textContent = "Live";
-      badge.classList.add("live");
-    }
+      // Mute toggle
+      const muteBtn = document.getElementById("muteBtn");
+      muteBtn.addEventListener("click", () => {
+        muted = !muted;
+        video.muted = muted;
+        muteBtn.textContent = muted ? "🔇 Muted" : "🔊 Live audio";
+      });
 
-    function showOffline(msg = "Stream is offline") {
-      overlay.classList.remove("hidden");
-      overlay.querySelector("div:last-child").textContent = msg;
-      badge.textContent = "Offline";
-      badge.classList.remove("live");
-      segInfo.textContent = "—";
-    }
+      // ── Status / render ───────────────────────────────────────────────────
+      function render({ running, token, hlsUrl, hlsPort, previewUrl }) {
+        const hlsOrigin = hlsPort
+          ? `http://${location.hostname}:${hlsPort}`
+          : origin;
+        document.getElementById("dot").className =
+          "dot" + (running ? " live" : "");
+        document.getElementById("statusLabel").innerHTML =
+          `Stream is <strong>${running ? "LIVE" : "OFFLINE"}</strong>`;
+        document.getElementById("btnStart").disabled = running;
+        document.getElementById("btnStop").disabled = !running;
 
-    // Toggle preview
-    const togglePreviewBtn = document.getElementById("togglePreviewBtn");
-    togglePreviewBtn.addEventListener("click", () => {
-      previewEnabled = !previewEnabled;
-      togglePreviewBtn.textContent = previewEnabled ? "Disable" : "Enable";
-      togglePreviewBtn.classList.toggle("disabled-state", !previewEnabled);
-      if (!previewEnabled) {
-        destroyHls();
-        showOffline("Preview disabled.");
-      } else {
-        refresh();
+        const block = document.getElementById("infoBlock");
+        if (running && token) {
+          block.classList.add("visible");
+          document.getElementById("hlsUrl").textContent = hlsOrigin + hlsUrl;
+          // Use the HTTPS proxy URL for preview to avoid mixed content
+          loadPreview(previewUrl ? origin + previewUrl : hlsOrigin + hlsUrl);
+          if (!previewEnabled) {
+            destroyHls();
+            showOffline("Preview disabled.");
+          }
+        } else {
+          block.classList.remove("visible");
+          destroyHls();
+          showOffline();
+        }
       }
-    });
 
-    // Mute toggle
-    const muteBtn = document.getElementById("muteBtn");
-    muteBtn.addEventListener("click", () => {
-      muted = !muted;
-      video.muted = muted;
-      muteBtn.textContent = muted ? "🔇 Muted" : "🔊 Live audio";
-    });
-
-    // ── Status / render ───────────────────────────────────────────────────
-    function render({ running, token, hlsUrl, hlsPort }) {
-      const hlsOrigin = hlsPort ? `http://${location.hostname}:${hlsPort}` : origin;
-      document.getElementById("dot").className = "dot" + (running ? " live" : "");
-      document.getElementById("statusLabel").innerHTML =
-        `Stream is <strong>${running ? "LIVE" : "OFFLINE"}</strong>`;
-      document.getElementById("btnStart").disabled = running;
-      document.getElementById("btnStop").disabled  = !running;
-
-      const block = document.getElementById("infoBlock");
-      if (running && token) {
-        block.classList.add("visible");
-        document.getElementById("hlsUrl").textContent = hlsOrigin + hlsUrl;
-        loadPreview(hlsOrigin + hlsUrl);
-        if (!previewEnabled) { destroyHls(); showOffline("Preview disabled."); }
-      } else {
-        block.classList.remove("visible");
-        destroyHls();
-        showOffline();
+      async function fetchStatus() {
+        const r = await fetch("/admin/status");
+        if (r.status === 401) {
+          location.href = "/admin/login";
+          return null;
+        }
+        return r.json();
       }
-    }
 
-    async function fetchStatus() {
-      const r = await fetch("/admin/status");
-      if (r.status === 401) { location.href = "/admin/login"; return null; }
-      return r.json();
-    }
-
-    async function refresh() {
-      try {
-        const data = await fetchStatus();
-        if (data) render(data);
-      } catch { /* network blip */ }
-    }
-
-    // ── Actions ───────────────────────────────────────────────────────────
-    document.getElementById("btnStart").addEventListener("click", async () => {
-      document.getElementById("btnStart").disabled = true;
-      try {
-        const r = await fetch("/admin/start", { method: "POST" });
-        const d = await r.json();
-        if (d.ok) { toast("Stream started."); await refresh(); }
-        else toast(d.error || "Failed to start.", true);
-      } catch { toast("Request failed.", true); }
-      await refresh();
-    });
-
-    document.getElementById("btnStop").addEventListener("click", async () => {
-      document.getElementById("btnStop").disabled = true;
-      try {
-        const r = await fetch("/admin/stop", { method: "POST" });
-        const d = await r.json();
-        if (d.ok) { toast("Stream stopped."); await refresh(); }
-        else toast(d.error || "Failed to stop.", true);
-      } catch { toast("Request failed.", true); }
-      await refresh();
-    });
-
-    document.getElementById("logoutBtn").addEventListener("click", async () => {
-      await fetch("/admin/logout", { method: "POST" });
-      location.href = "/admin/login";
-    });
-
-    // Copy buttons
-    function copyToClipboard(text) {
-      if (navigator.clipboard?.writeText) {
-        return navigator.clipboard.writeText(text);
-      }
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-        return Promise.resolve();
-      } finally {
-        document.body.removeChild(ta);
-      }
-    }
-
-    document.querySelectorAll(".copy-btn[data-copy]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const el = document.getElementById(btn.dataset.copy);
-        const text = (el.href !== undefined && el.href !== "" ? el.href : null) ?? el.textContent?.trim() ?? "";
-        if (!text) return;
+      async function refresh() {
         try {
-          await copyToClipboard(text);
-          btn.textContent = "✓";
-          btn.classList.add("ok");
-          setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("ok"); }, 1500);
+          const data = await fetchStatus();
+          if (data) render(data);
         } catch {
-          toast("Copy failed. Try selecting the text manually.", true);
+          /* network blip */
         }
-      });
-    });
+      }
 
-    // ── Boot ──────────────────────────────────────────────────────────────
-    refresh();
-    pollTimer = setInterval(refresh, 5000);
-  </script>
-</body>
+      // ── Actions ───────────────────────────────────────────────────────────
+      document
+        .getElementById("btnStart")
+        .addEventListener("click", async () => {
+          document.getElementById("btnStart").disabled = true;
+          try {
+            const r = await fetch("/admin/start", { method: "POST" });
+            const d = await r.json();
+            if (d.ok) {
+              toast("Stream started.");
+              await refresh();
+            } else toast(d.error || "Failed to start.", true);
+          } catch {
+            toast("Request failed.", true);
+          }
+          await refresh();
+        });
+
+      document.getElementById("btnStop").addEventListener("click", async () => {
+        document.getElementById("btnStop").disabled = true;
+        try {
+          const r = await fetch("/admin/stop", { method: "POST" });
+          const d = await r.json();
+          if (d.ok) {
+            toast("Stream stopped.");
+            await refresh();
+          } else toast(d.error || "Failed to stop.", true);
+        } catch {
+          toast("Request failed.", true);
+        }
+        await refresh();
+      });
+
+      document
+        .getElementById("logoutBtn")
+        .addEventListener("click", async () => {
+          await fetch("/admin/logout", { method: "POST" });
+          location.href = "/admin/login";
+        });
+
+      // Copy buttons
+      function copyToClipboard(text) {
+        if (navigator.clipboard?.writeText) {
+          return navigator.clipboard.writeText(text);
+        }
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+          return Promise.resolve();
+        } finally {
+          document.body.removeChild(ta);
+        }
+      }
+
+      document.querySelectorAll(".copy-btn[data-copy]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const el = document.getElementById(btn.dataset.copy);
+          const text =
+            (el.href !== undefined && el.href !== "" ? el.href : null) ??
+            el.textContent?.trim() ??
+            "";
+          if (!text) return;
+          try {
+            await copyToClipboard(text);
+            btn.textContent = "✓";
+            btn.classList.add("ok");
+            setTimeout(() => {
+              btn.textContent = "Copy";
+              btn.classList.remove("ok");
+            }, 1500);
+          } catch {
+            toast("Copy failed. Try selecting the text manually.", true);
+          }
+        });
+      });
+
+      // ── Boot ──────────────────────────────────────────────────────────────
+      refresh();
+      pollTimer = setInterval(refresh, 5000);
+    </script>
+  </body>
 </html>
