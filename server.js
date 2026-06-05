@@ -51,19 +51,20 @@ const HLS_DELETE_THRESHOLD = process.env.HLS_DELETE_THRESHOLD || "4";
 const HLS_MAX_SEGMENTS = Number(process.env.HLS_MAX_SEGMENTS || "60");
 const HLS_CLEAN_INTERVAL_MS = Number(process.env.HLS_CLEAN_INTERVAL_MS || "0");
 
-// Video mode
+// Video mode (ignored when filler frames are on — filler requires re-encode)
 const VIDEO_MODE = process.env.VIDEO_MODE || "copy"; // "copy" | "encode"
+
+// Filler — black video + silence while SRT is down or between frames
+const FILLER_FRAMES = process.env.FILLER_FRAMES !== "0";
+const FILLER_WIDTH = Number(process.env.FILLER_WIDTH || "1920");
+const FILLER_HEIGHT = Number(process.env.FILLER_HEIGHT || "1080");
+const FILLER_FPS = Number(process.env.FILLER_FPS || "30");
+// Set to 1 if the SRT source has no audio track (OBS audio disabled)
+const FILLER_SILENCE_AUDIO = process.env.FILLER_SILENCE_AUDIO === "1";
 
 // Input probe — must be large enough to read H.264 SPS/PPS from the first keyframe
 const FFPROBE_SIZE = process.env.FFPROBE_SIZE || "1048576"; // 1 MB
 const FFANALYZE_DURATION = process.env.FFANALYZE_DURATION || "1000000"; // 1s (µs)
-
-// Filler — continuous slate when SRT is waiting or disconnected
-const FILLER_ENABLED = process.env.FILLER_ENABLED !== "0";
-const FILLER_WIDTH = process.env.FILLER_WIDTH || "1920";
-const FILLER_HEIGHT = process.env.FILLER_HEIGHT || "1080";
-const FILLER_FPS = Number(process.env.FILLER_FPS || "30");
-const FILLER_COLOR = process.env.FILLER_COLOR || "0x0a0a0a";
 
 // ---------------------------------------------------------------------------
 // Stream state
@@ -182,127 +183,8 @@ function cleanupOldSegments() {
   });
 }
 
-function buildFfmpegArgs() {
-  const gop = Math.max(FILLER_FPS, FILLER_FPS * Number(HLS_TIME));
-
-  if (!FILLER_ENABLED) {
-    const inputArgs = [
-      "-hide_banner",
-      "-loglevel",
-      "warning",
-      "-fflags",
-      "nobuffer+flush_packets",
-      "-flags",
-      "low_delay",
-      "-probesize",
-      FFPROBE_SIZE,
-      "-analyzeduration",
-      FFANALYZE_DURATION,
-      "-i",
-      SRT_URL,
-      "-map",
-      "0:v:0",
-      "-map",
-      "0:a:0",
-    ];
-
-    const videoArgs =
-      VIDEO_MODE === "encode"
-        ? [
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-tune",
-            "zerolatency",
-            "-pix_fmt",
-            "yuv420p",
-            "-g",
-            String(gop),
-            "-keyint_min",
-            String(gop),
-            "-sc_threshold",
-            "0",
-          ]
-        : ["-c:v", "copy"];
-
-    const audioArgs =
-      VIDEO_MODE === "encode"
-        ? ["-c:a", "aac", "-b:a", "128k"]
-        : ["-c:a", "copy"];
-
-    return [...inputArgs, ...videoArgs, ...audioArgs];
-  }
-
-  const size = `${FILLER_WIDTH}x${FILLER_HEIGHT}`;
-  const inputArgs = [
-    "-hide_banner",
-    "-loglevel",
-    "warning",
-    "-f",
-    "lavfi",
-    "-i",
-    `color=c=${FILLER_COLOR}:s=${size}:r=${FILLER_FPS}`,
-    "-thread_queue_size",
-    "1024",
-    "-probesize",
-    FFPROBE_SIZE,
-    "-analyzeduration",
-    FFANALYZE_DURATION,
-    "-fflags",
-    "nobuffer+genpts",
-    "-flags",
-    "low_delay",
-    "-i",
-    SRT_URL,
-  ];
-
-  const filterComplex = [
-    `[1:v]scale=${FILLER_WIDTH}:${FILLER_HEIGHT}:force_original_aspect_ratio=decrease`,
-    `pad=${FILLER_WIDTH}:${FILLER_HEIGHT}:(ow-iw)/2:(oh-ih)/2`,
-    `fps=${FILLER_FPS},tpad=stop_mode=clone:stop_duration=3600`,
-    `format=yuv420p,setpts=PTS-STARTPTS[live]`,
-    `[0:v]format=yuv420p,setpts=PTS-STARTPTS[filler]`,
-    `[filler][live]overlay=shortest=0:eof_action=pass:format=auto[vout]`,
-  ].join(",");
-
-  const encodeArgs = [
-    "-filter_complex",
-    filterComplex,
-    "-map",
-    "[vout]",
-    "-map",
-    "1:a?",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-tune",
-    "zerolatency",
-    "-pix_fmt",
-    "yuv420p",
-    "-r",
-    String(FILLER_FPS),
-    "-g",
-    String(gop),
-    "-keyint_min",
-    String(gop),
-    "-sc_threshold",
-    "0",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-  ];
-
-  return [...inputArgs, ...encodeArgs];
-}
-
-function startFfmpeg() {
-  ensureDir(HLS_DIR);
-  clearSegmentsOnStart();
-
-  const outputArgs = [
+function hlsOutputArgs() {
+  return [
     "-muxdelay",
     "0",
     "-muxpreload",
@@ -321,8 +203,122 @@ function startFfmpeg() {
     path.join(HLS_DIR, "seg_%06d.ts"),
     path.join(HLS_DIR, PLAYLIST),
   ];
+}
 
-  ffmpegChild = spawn("ffmpeg", [...buildFfmpegArgs(), ...outputArgs], {
+function encodeVideoArgs() {
+  return [
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-tune",
+    "zerolatency",
+    "-pix_fmt",
+    "yuv420p",
+    "-g",
+    String(FILLER_FPS),
+    "-keyint_min",
+    String(FILLER_FPS),
+    "-sc_threshold",
+    "0",
+  ];
+}
+
+function buildFfmpegArgs() {
+  const commonInput = [
+    "-hide_banner",
+    "-loglevel",
+    "warning",
+    "-fflags",
+    "nobuffer+flush_packets",
+    "-flags",
+    "low_delay",
+    "-probesize",
+    FFPROBE_SIZE,
+    "-analyzeduration",
+    FFANALYZE_DURATION,
+  ];
+
+  if (!FILLER_FRAMES) {
+    const videoArgs =
+      VIDEO_MODE === "encode" ? encodeVideoArgs() : ["-c:v", "copy"];
+    const audioArgs =
+      VIDEO_MODE === "encode"
+        ? ["-c:a", "aac", "-b:a", "128k"]
+        : ["-c:a", "copy"];
+
+    return [
+      ...commonInput,
+      "-i",
+      SRT_URL,
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a:0",
+      ...videoArgs,
+      ...audioArgs,
+      ...hlsOutputArgs(),
+    ];
+  }
+
+  const w = FILLER_WIDTH;
+  const h = FILLER_HEIGHT;
+  const fps = FILLER_FPS;
+
+  // Lavfi base runs continuously; SRT is composited when available.
+  // fps+repeatlast keeps the last live frame during short stalls; eof_action=pass
+  // falls back to black when SRT disconnects.
+  const audioFilter = FILLER_SILENCE_AUDIO
+    ? "[1:a]asetpts=PTS-STARTPTS[a]"
+    : [
+        "[2:a]asetpts=PTS-STARTPTS,aresample=48000,",
+        "aformat=sample_fmts=fltp:channel_layouts=stereo[livea]",
+        "[1:a][livea]amix=inputs=2:duration=longest:dropout_transition=0[a]",
+      ].join("");
+
+  const filter = [
+    `[2:v]fps=${fps},format=yuv420p,`,
+    `scale=${w}:${h}:force_original_aspect_ratio=decrease,`,
+    `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,`,
+    `setpts=PTS-STARTPTS[livev]`,
+    `[0:v][livev]overlay=shortest=0:eof_action=pass:repeatlast=1[v]`,
+    audioFilter,
+  ].join("");
+
+  return [
+    ...commonInput,
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=black:s=${w}x${h}:r=${fps}`,
+    "-f",
+    "lavfi",
+    "-i",
+    "anullsrc=r=48000:cl=stereo",
+    "-thread_queue_size",
+    "1024",
+    "-i",
+    SRT_URL,
+    "-filter_complex",
+    filter,
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    ...encodeVideoArgs(),
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    ...hlsOutputArgs(),
+  ];
+}
+
+function startFfmpeg() {
+  ensureDir(HLS_DIR);
+  clearSegmentsOnStart();
+
+  ffmpegChild = spawn("ffmpeg", buildFfmpegArgs(), {
     stdio: ["ignore", "inherit", "inherit"],
   });
 
@@ -331,7 +327,7 @@ function startFfmpeg() {
     if (shuttingDown || streamToken === null) return;
     const reason =
       code === 0
-        ? "process ended unexpectedly"
+        ? "input disconnected (OBS stopped or SRT dropped)"
         : `code=${code}, signal=${signal}`;
     console.warn(`[ffmpeg] exited (${reason}), restarting in 1s`);
     setTimeout(startFfmpeg, 1000);
@@ -491,7 +487,8 @@ function sendHlsFile(filename, res) {
 }
 
 app.get("/:token/hls/:file", (req, res) => {
-  if (!streamToken || req.params.token !== streamToken) return res.status(404).end();
+  if (!streamToken || req.params.token !== streamToken)
+    return res.status(404).end();
   sendHlsFile(req.params.file, res);
 });
 
@@ -503,8 +500,8 @@ app.get("/health", (req, res) => {
     ok: true,
     ffmpegRunning: Boolean(ffmpegChild),
     streamActive: streamToken !== null,
-    videoMode: VIDEO_MODE,
-    fillerEnabled: FILLER_ENABLED,
+    videoMode: FILLER_FRAMES ? "encode" : VIDEO_MODE,
+    fillerFrames: FILLER_FRAMES,
   });
 });
 
@@ -530,13 +527,15 @@ const adminServer = https.createServer(tlsOptions, app).listen(PORT, HOST);
 // Minimal HTTP app — public HLS only (no admin routes)
 const hlsApp = express();
 hlsApp.get("/:token/hls/:file", (req, res) => {
-  if (!streamToken || req.params.token !== streamToken) return res.status(404).end();
+  if (!streamToken || req.params.token !== streamToken)
+    return res.status(404).end();
   sendHlsFile(req.params.file, res);
 });
 
 const hlsServer = http.createServer(hlsApp).listen(HLS_PORT, HOST, () => {
   console.log(
-    `[hls] mpegts · ${HLS_TIME}s segments · playlist ${HLS_LIST_SIZE}${FILLER_ENABLED ? " · filler on" : ""}`,
+    `[hls] mpegts · ${HLS_TIME}s segments · playlist ${HLS_LIST_SIZE}` +
+      (FILLER_FRAMES ? ` · filler ${FILLER_WIDTH}x${FILLER_HEIGHT}@${FILLER_FPS}fps` : ""),
   );
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
