@@ -205,9 +205,9 @@ function hlsOutputArgs() {
     "delete_segments+append_list+independent_segments",
     "-hls_segment_filename",
     path.join(HLS_DIR, "seg_%06d.ts"),
-    path.join(HLS_DIR, PLAYLIST),
   ];
   if (FILLER_FRAMES) args.push("-ignore_io_errors", "1");
+  args.push(path.join(HLS_DIR, PLAYLIST));
   return args;
 }
 
