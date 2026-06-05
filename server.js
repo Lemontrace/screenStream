@@ -32,10 +32,14 @@ const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || "";
 if (!SRT_PASSPHRASE) {
   console.warn("[warn] SRT_PASSPHRASE is not set — stream is unauthenticated");
 }
-const SRT_LATENCY = Number(process.env.SRT_LATENCY || "120"); // ms receiver buffer
+// FFmpeg SRT latency is in microseconds (120 ms → 120000)
+const SRT_LATENCY_MS = Number(
+  process.env.SRT_LATENCY_MS || process.env.SRT_LATENCY || "120",
+);
+const SRT_LATENCY_US = SRT_LATENCY_MS * 1000;
 const SRT_URL =
   process.env.SRT_URL ||
-  `srt://0.0.0.0:5555?mode=listener&pbkeylen=32&latency=${SRT_LATENCY}${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
+  `srt://0.0.0.0:5555?mode=listener&pbkeylen=32&latency=${SRT_LATENCY_US}&listen_timeout=-1${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
 
 // HLS output
 const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
@@ -184,7 +188,7 @@ function cleanupOldSegments() {
 }
 
 function hlsOutputArgs() {
-  return [
+  const args = [
     "-muxdelay",
     "0",
     "-muxpreload",
@@ -202,6 +206,21 @@ function hlsOutputArgs() {
     "-hls_segment_filename",
     path.join(HLS_DIR, "seg_%06d.ts"),
     path.join(HLS_DIR, PLAYLIST),
+  ];
+  if (FILLER_FRAMES) args.push("-ignore_io_errors", "1");
+  return args;
+}
+
+function srtInputArgs() {
+  return [
+    "-thread_queue_size",
+    "1024",
+    "-err_detect",
+    "ignore_err",
+    "-fflags",
+    "+discardcorrupt+genpts",
+    "-i",
+    SRT_URL,
   ];
 }
 
@@ -249,8 +268,7 @@ function buildFfmpegArgs() {
 
     return [
       ...commonInput,
-      "-i",
-      SRT_URL,
+      ...srtInputArgs(),
       "-map",
       "0:v:0",
       "-map",
@@ -297,10 +315,7 @@ function buildFfmpegArgs() {
     "lavfi",
     "-i",
     "anullsrc=r=48000:cl=stereo",
-    "-thread_queue_size",
-    "1024",
-    "-i",
-    SRT_URL,
+    ...srtInputArgs(),
     "-filter_complex",
     filter,
     "-map",
@@ -316,9 +331,9 @@ function buildFfmpegArgs() {
   ];
 }
 
-function startFfmpeg() {
+function startFfmpeg(clearSegments = true) {
   ensureDir(HLS_DIR);
-  clearSegmentsOnStart();
+  if (clearSegments) clearSegmentsOnStart();
 
   ffmpegChild = spawn("ffmpeg", buildFfmpegArgs(), {
     stdio: ["ignore", "inherit", "inherit"],
@@ -329,10 +344,11 @@ function startFfmpeg() {
     if (shuttingDown || streamToken === null) return;
     const reason =
       code === 0
-        ? "input disconnected (OBS stopped or SRT dropped)"
+        ? "SRT disconnected — restarting listener"
         : `code=${code}, signal=${signal}`;
     console.warn(`[ffmpeg] exited (${reason}), restarting in 1s`);
-    setTimeout(startFfmpeg, 1000);
+    // Keep existing HLS segments when filler is on — output stays continuous
+    setTimeout(() => startFfmpeg(!FILLER_FRAMES), 1000);
   });
 }
 
