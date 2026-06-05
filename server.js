@@ -32,14 +32,13 @@ const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || "";
 if (!SRT_PASSPHRASE) {
   console.warn("[warn] SRT_PASSPHRASE is not set — stream is unauthenticated");
 }
-// FFmpeg SRT latency is in microseconds (120 ms → 120000)
+// SRT URL latency is in milliseconds
 const SRT_LATENCY_MS = Number(
   process.env.SRT_LATENCY_MS || process.env.SRT_LATENCY || "120",
 );
-const SRT_LATENCY_US = SRT_LATENCY_MS * 1000;
 const SRT_URL =
   process.env.SRT_URL ||
-  `srt://0.0.0.0:5555?mode=listener&pbkeylen=32&latency=${SRT_LATENCY_US}&listen_timeout=-1${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
+  `srt://0.0.0.0:5555?mode=listener&pbkeylen=32&latency=${SRT_LATENCY_MS}&listen_timeout=-1${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
 
 // HLS output
 const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
