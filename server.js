@@ -41,11 +41,9 @@ const SRT_URL =
 const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
 const PLAYLIST = process.env.PLAYLIST || "index.m3u8";
 
-// HLS tuning — 1s segments + partials target ~1–2s glass-to-glass in the browser
+// HLS tuning — 1s segments target low glass-to-glass latency in the browser
 const HLS_TIME = process.env.HLS_TIME || "1";
 const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "5";
-const HLS_PART_TIME = process.env.HLS_PART_TIME || "0.25";
-const HLS_LL = process.env.HLS_LL !== "0"; // fMP4 partial segments (LL-HLS)
 // Extra segments kept on disk beyond the playlist before FFmpeg deletes them
 const HLS_DELETE_THRESHOLD = process.env.HLS_DELETE_THRESHOLD || "4";
 
@@ -128,12 +126,7 @@ function ensureDir(p) {
 }
 
 function isHlsSegment(name) {
-  return (
-    name.endsWith(".ts") ||
-    name.endsWith(".m4s") ||
-    name === "init.mp4" ||
-    name === PLAYLIST
-  );
+  return name.endsWith(".ts") || name === PLAYLIST;
 }
 
 function clearSegmentsOnStart() {
@@ -157,7 +150,7 @@ function cleanupOldSegments() {
   if (!Number.isFinite(HLS_MAX_SEGMENTS) || HLS_MAX_SEGMENTS <= 0) return;
   fs.readdir(HLS_DIR, (err, files) => {
     if (err) return;
-    const segFiles = files.filter((f) => f.endsWith(".ts") || f.endsWith(".m4s"));
+    const segFiles = files.filter((f) => f.endsWith(".ts"));
     if (segFiles.length <= HLS_MAX_SEGMENTS) return;
     const withStats = segFiles
       .map((name) => {
@@ -229,10 +222,6 @@ function startFfmpeg() {
       ? ["-c:a", "aac", "-b:a", "128k"]
       : ["-c:a", "copy"];
 
-  const hlsFlags = HLS_LL
-    ? "delete_segments+append_list+independent_segments+program_date_time"
-    : "delete_segments+append_list+independent_segments";
-
   const outputArgs = [
     "-muxdelay",
     "0",
@@ -247,26 +236,11 @@ function startFfmpeg() {
     "-hls_delete_threshold",
     String(HLS_DELETE_THRESHOLD),
     "-hls_flags",
-    hlsFlags,
+    "delete_segments+append_list+independent_segments",
+    "-hls_segment_filename",
+    path.join(HLS_DIR, "seg_%06d.ts"),
+    path.join(HLS_DIR, PLAYLIST),
   ];
-
-  if (HLS_LL) {
-    outputArgs.push(
-      "-hls_segment_type",
-      "fmp4",
-      "-hls_part_time",
-      String(HLS_PART_TIME),
-      "-hls_segment_filename",
-      path.join(HLS_DIR, "seg_%06d.m4s"),
-    );
-  } else {
-    outputArgs.push(
-      "-hls_segment_filename",
-      path.join(HLS_DIR, "seg_%06d.ts"),
-    );
-  }
-
-  outputArgs.push(path.join(HLS_DIR, PLAYLIST));
 
   ffmpegChild = spawn(
     "ffmpeg",
@@ -472,6 +446,9 @@ const hlsApp = express();
 hlsApp.use(hlsMiddleware);
 
 const hlsServer = http.createServer(hlsApp).listen(HLS_PORT, HOST, () => {
+  console.log(
+    `[hls] mpegts · ${HLS_TIME}s segments · playlist ${HLS_LIST_SIZE}`,
+  );
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
 });
