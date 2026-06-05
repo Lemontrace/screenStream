@@ -33,9 +33,7 @@ if (!SRT_PASSPHRASE) {
   console.warn("[warn] SRT_PASSPHRASE is not set — stream is unauthenticated");
 }
 // SRT URL latency is in milliseconds
-const SRT_LATENCY_MS = Number(
-  process.env.SRT_LATENCY_MS || process.env.SRT_LATENCY || "120",
-);
+const SRT_LATENCY_MS = Number(process.env.SRT_LATENCY || "500");
 const SRT_URL =
   process.env.SRT_URL ||
   `srt://0.0.0.0:5555?mode=listener&pbkeylen=32&latency=${SRT_LATENCY_MS}&listen_timeout=-1${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
@@ -412,8 +410,7 @@ function buildFfmpegArgs() {
     `setpts=PTS-STARTPTS[livev]`,
   ].join("");
 
-  const overlay =
-    `[0:v][livev]overlay=shortest=0:eof_action=pass:repeatlast=1[v]`;
+  const overlay = `[0:v][livev]overlay=shortest=0:eof_action=pass:repeatlast=1[v]`;
 
   const audioChains = FILLER_SILENCE_AUDIO
     ? ["[1:a]asetpts=PTS-STARTPTS[a]"]
