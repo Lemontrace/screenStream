@@ -43,9 +43,8 @@ const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
 const PLAYLIST = process.env.PLAYLIST || "index.m3u8";
 const SRT_FIFO = path.join(HLS_DIR, ".srt.pipe");
 
-// HLS tuning — 1s segments target low glass-to-glass latency in the browser
 const HLS_TIME = process.env.HLS_TIME || "1";
-const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "6";
+const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "12";
 // Extra segments kept on disk beyond the playlist before FFmpeg deletes them
 const HLS_DELETE_THRESHOLD = process.env.HLS_DELETE_THRESHOLD || "8";
 
