@@ -290,6 +290,8 @@ function buildSrtRelayArgs() {
     "-hide_banner",
     "-loglevel",
     "warning",
+    "-y",
+    "-nostdin",
     ...srtInputArgs(),
     "-c",
     "copy",
