@@ -392,27 +392,34 @@ app.post("/admin/stop", requireAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Public stream routes — served on both HTTP and HTTPS
+// HLS file serving
 // ---------------------------------------------------------------------------
 
-function hlsMiddleware(req, res, next) {
-  if (!streamToken) return next();
-  const base = hlsBasePath(streamToken);
-  if (!req.path.startsWith(base + "/")) return next();
-  req.url = req.path.slice(base.length);
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-  express.static(HLS_DIR, {
-    etag: false,
-    lastModified: false,
-    setHeaders(res, filePath) {
-      if (filePath.endsWith(".m3u8")) {
-        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-      }
-    },
-  })(req, res, next);
+function safeHlsFilename(name) {
+  const base = path.basename(name);
+  if (base === PLAYLIST) return base;
+  if (/^seg_\d+\.ts$/.test(base)) return base;
+  return null;
 }
 
-app.use(hlsMiddleware);
+function sendHlsFile(filename, res) {
+  const safe = safeHlsFilename(filename);
+  if (!safe) return res.status(404).end();
+  const full = path.join(HLS_DIR, safe);
+  if (!fs.existsSync(full)) return res.status(404).end();
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  if (safe.endsWith(".m3u8")) {
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+  } else {
+    res.setHeader("Content-Type", "video/mp2t");
+  }
+  res.sendFile(full);
+}
+
+app.get("/:token/hls/:file", (req, res) => {
+  if (!streamToken || req.params.token !== streamToken) return res.status(404).end();
+  sendHlsFile(req.params.file, res);
+});
 
 // ---------------------------------------------------------------------------
 // Health
@@ -445,9 +452,12 @@ try {
 
 const adminServer = https.createServer(tlsOptions, app).listen(PORT, HOST);
 
-// Minimal HTTP app — HLS segments only, no admin routes
+// Minimal HTTP app — public HLS only (no admin routes)
 const hlsApp = express();
-hlsApp.use(hlsMiddleware);
+hlsApp.get("/:token/hls/:file", (req, res) => {
+  if (!streamToken || req.params.token !== streamToken) return res.status(404).end();
+  sendHlsFile(req.params.file, res);
+});
 
 const hlsServer = http.createServer(hlsApp).listen(HLS_PORT, HOST, () => {
   console.log(

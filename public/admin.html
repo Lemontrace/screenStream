@@ -460,9 +460,9 @@
     <script>
       let pollTimer = null;
       let latencyTimer = null;
-      let retryTimer = null;
+      let waitTimer = null;
       let hls = null;
-      let currentHls = null;
+      let previewTarget = null;
       let muted = true;
       let previewEnabled = true;
 
@@ -484,48 +484,60 @@
       const badge = document.getElementById("previewBadge");
       const segInfo = document.getElementById("segInfo");
 
-      function destroyHls() {
+      function stopPlayer() {
         clearInterval(latencyTimer);
-        clearTimeout(retryTimer);
         latencyTimer = null;
-        retryTimer = null;
         if (hls) {
           hls.destroy();
           hls = null;
         }
-        currentHls = null;
       }
 
-      async function playlistReady(hlsUrl) {
+      function stopPreview() {
+        stopPlayer();
+        if (waitTimer) {
+          clearInterval(waitTimer);
+          waitTimer = null;
+        }
+        previewTarget = null;
+      }
+
+      function isManifestMissing(err) {
+        return (
+          err?.type === Hls.ErrorTypes.NETWORK_ERROR &&
+          (err.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+            err.details === "manifestLoadError" ||
+            err.response?.code === 404)
+        );
+      }
+
+      async function probeManifest(url) {
         try {
-          const r = await fetch(hlsUrl, { cache: "no-store" });
-          if (!r.ok) return false;
-          const text = await r.text();
-          return text.includes("#EXTINF");
+          const r = await fetch(url, { cache: "no-store" });
+          return r.ok;
         } catch {
           return false;
         }
       }
 
-      function scheduleRetry(hlsUrl, ms = 1000) {
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(() => loadPreview(hlsUrl), ms);
+      function startWaitLoop(url) {
+        if (waitTimer) return;
+        showOffline("Waiting for stream…");
+        const tick = async () => {
+          if (previewTarget !== url) return;
+          if (await probeManifest(url)) {
+            clearInterval(waitTimer);
+            waitTimer = null;
+            startPlayer(url);
+          }
+        };
+        tick();
+        waitTimer = setInterval(tick, 1000);
       }
 
-      async function loadPreview(hlsUrl) {
-        if (!hlsUrl || !previewEnabled) return;
-        if (currentHls === hlsUrl && hls) return;
-
-        clearTimeout(retryTimer);
-
-        if (!(await playlistReady(hlsUrl))) {
-          showOffline("Waiting for stream…");
-          scheduleRetry(hlsUrl);
-          return;
-        }
-
-        if (currentHls === hlsUrl && hls) return;
-        destroyHls();
+      function startPlayer(url) {
+        stopPlayer();
+        previewTarget = url;
 
         if (typeof Hls === "undefined") {
           showOffline("hls.js failed to load.");
@@ -536,10 +548,11 @@
           video.canPlayType("application/vnd.apple.mpegurl") &&
           !Hls.isSupported()
         ) {
-          currentHls = hlsUrl;
-          video.src = hlsUrl;
+          video.src = url;
           video.muted = muted;
-          video.play().catch((err) => showOffline(`Autoplay blocked: ${err.message}`));
+          video.play().catch((err) =>
+            showOffline(`Autoplay blocked: ${err.message}`),
+          );
           showLive();
           return;
         }
@@ -549,7 +562,6 @@
           return;
         }
 
-        currentHls = hlsUrl;
         hls = new Hls({
           lowLatencyMode: false,
           liveSyncDurationCount: 2,
@@ -559,9 +571,10 @@
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.muted = muted;
-          video.play().catch((err) => showOffline(`Autoplay blocked: ${err.message}`));
+          video.play().catch((err) =>
+            showOffline(`Autoplay blocked: ${err.message}`),
+          );
           showLive();
-          clearInterval(latencyTimer);
           latencyTimer = setInterval(() => {
             if (!video.buffered.length) return;
             const end = video.buffered.end(video.buffered.length - 1);
@@ -573,13 +586,9 @@
         hls.on(Hls.Events.ERROR, (_, data) => {
           console.warn("[hls]", data.type, data.details, data);
           if (!data.fatal) return;
-          if (
-            data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-            data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR
-          ) {
-            destroyHls();
-            showOffline("Waiting for stream…");
-            scheduleRetry(hlsUrl);
+          if (isManifestMissing(data)) {
+            stopPlayer();
+            startWaitLoop(url);
             return;
           }
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -590,14 +599,25 @@
             hls.recoverMediaError();
             return;
           }
-          const url = hlsUrl;
-          destroyHls();
+          stopPlayer();
           showOffline(`Playback error: ${data.details || data.type}`);
-          scheduleRetry(url, 3000);
+          startWaitLoop(url);
         });
 
         hls.attachMedia(video);
-        hls.loadSource(hlsUrl);
+        hls.loadSource(url);
+      }
+
+      function ensurePreview(url) {
+        if (!url || !previewEnabled) {
+          stopPreview();
+          return;
+        }
+        if (previewTarget === url && hls) return;
+        if (previewTarget === url && waitTimer) return;
+        stopPreview();
+        previewTarget = url;
+        startWaitLoop(url);
       }
 
       function showLive() {
@@ -621,7 +641,7 @@
         togglePreviewBtn.textContent = previewEnabled ? "Disable" : "Enable";
         togglePreviewBtn.classList.toggle("disabled-state", !previewEnabled);
         if (!previewEnabled) {
-          destroyHls();
+          stopPreview();
           showOffline("Preview disabled.");
         } else {
           refresh();
@@ -650,14 +670,14 @@
           block.classList.add("visible");
           document.getElementById("hlsUrl").textContent = hlsHttpUrl;
           if (previewEnabled) {
-            loadPreview(hlsHttpsUrl);
+            ensurePreview(hlsHttpsUrl);
           } else {
-            destroyHls();
+            stopPreview();
             showOffline("Preview disabled.");
           }
         } else {
           block.classList.remove("visible");
-          destroyHls();
+          stopPreview();
           showOffline();
         }
       }
