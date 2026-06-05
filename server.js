@@ -268,22 +268,24 @@ function buildFfmpegArgs() {
   // Lavfi base runs continuously; SRT is composited when available.
   // fps+repeatlast keeps the last live frame during short stalls; eof_action=pass
   // falls back to black when SRT disconnects.
-  const audioFilter = FILLER_SILENCE_AUDIO
-    ? "[1:a]asetpts=PTS-STARTPTS[a]"
-    : [
-        "[2:a]asetpts=PTS-STARTPTS,aresample=48000,",
-        "aformat=sample_fmts=fltp:channel_layouts=stereo[livea]",
-        "[1:a][livea]amix=inputs=2:duration=longest:dropout_transition=0[a]",
-      ].join("");
-
-  const filter = [
+  const liveVideo = [
     `[2:v]fps=${fps},format=yuv420p,`,
     `scale=${w}:${h}:force_original_aspect_ratio=decrease,`,
     `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,`,
     `setpts=PTS-STARTPTS[livev]`,
-    `[0:v][livev]overlay=shortest=0:eof_action=pass:repeatlast=1[v]`,
-    audioFilter,
   ].join("");
+
+  const overlay =
+    `[0:v][livev]overlay=shortest=0:eof_action=pass:repeatlast=1[v]`;
+
+  const audioChains = FILLER_SILENCE_AUDIO
+    ? ["[1:a]asetpts=PTS-STARTPTS[a]"]
+    : [
+        "[2:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[livea]",
+        "[1:a][livea]amix=inputs=2:duration=longest:dropout_transition=0[a]",
+      ];
+
+  const filter = [liveVideo, overlay, ...audioChains].join(";");
 
   return [
     ...commonInput,
