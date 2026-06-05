@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stream Admin — Control</title>
     <!-- hls.js for in-page preview -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
     <style>
       *,
       *::before,
@@ -439,7 +439,7 @@
           </div>
 
           <div class="video-wrapper">
-            <video id="preview" autoplay playsinline></video>
+            <video id="preview" autoplay playsinline muted></video>
             <div class="video-overlay" id="videoOverlay">
               <div class="overlay-icon">📡</div>
               <div>Stream is offline</div>
@@ -458,13 +458,18 @@
     <!-- /.layout -->
 
     <script>
-      const origin = location.origin;
+      const PLAYLIST = "index.m3u8";
       let pollTimer = null;
       let latencyTimer = null;
+      let retryTimer = null;
       let hls = null;
       let currentHls = null;
       let muted = true;
       let previewEnabled = true;
+
+      function previewPath(token) {
+        return token ? `/${token}/hls/${PLAYLIST}` : null;
+      }
 
       // ── Toast ──────────────────────────────────────────────────────────────
       function toast(msg, isError = false) {
@@ -486,7 +491,9 @@
 
       function destroyHls() {
         clearInterval(latencyTimer);
+        clearTimeout(retryTimer);
         latencyTimer = null;
+        retryTimer = null;
         if (hls) {
           hls.destroy();
           hls = null;
@@ -495,55 +502,60 @@
       }
 
       function loadPreview(hlsUrl) {
-        if (currentHls === hlsUrl) return; // already loaded
+        if (!hlsUrl || !previewEnabled) return;
+        // Only skip when a player instance is actually running this URL
+        if (currentHls === hlsUrl && hls) return;
+
         destroyHls();
         currentHls = hlsUrl;
 
+        if (typeof Hls === "undefined") {
+          currentHls = null;
+          showOffline("hls.js failed to load.");
+          return;
+        }
+
         if (
-          !Hls.isSupported() &&
-          video.canPlayType("application/vnd.apple.mpegurl")
+          video.canPlayType("application/vnd.apple.mpegurl") &&
+          !Hls.isSupported()
         ) {
-          // Native HLS (Safari)
           video.src = hlsUrl;
-          video.play().catch(() => {});
+          video.muted = muted;
+          video.play().catch((err) => showOffline(`Autoplay blocked: ${err.message}`));
           showLive();
           return;
         }
 
         if (!Hls.isSupported()) {
+          currentHls = null;
           showOffline("HLS not supported in this browser.");
           return;
         }
 
         hls = new Hls({
-          lowLatencyMode: true,
-          liveSyncDurationCount: 1,
-          liveMaxLatencyDurationCount: 3,
-          liveMaxLatencyDuration: 4,
-          maxLiveSyncPlaybackRate: 1.25,
-          backBufferLength: 0,
+          lowLatencyMode: false,
+          liveSyncDurationCount: 2,
+          liveMaxLatencyDurationCount: 5,
+          backBufferLength: 30,
         });
-
-        hls.loadSource(hlsUrl);
-        hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.muted = muted;
-          video.play().catch(() => {});
+          video.play().catch((err) => showOffline(`Autoplay blocked: ${err.message}`));
           showLive();
           clearInterval(latencyTimer);
           latencyTimer = setInterval(() => {
-            if (!hls) return;
-            const lat =
-              typeof hls.latency === "number" ? hls.latency.toFixed(1) : "—";
-            segInfo.textContent = `~${lat}s behind live`;
+            if (!video.buffered.length) return;
+            const end = video.buffered.end(video.buffered.length - 1);
+            const lag = Math.max(0, end - video.currentTime);
+            segInfo.textContent = `~${lag.toFixed(1)}s buffered`;
           }, 500);
         });
 
         hls.on(Hls.Events.ERROR, (_, data) => {
+          console.warn("[hls]", data.type, data.details, data);
           if (!data.fatal) return;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Recover in-place — avoids visible reload hiccup on a missed segment
             hls.startLoad(-1);
             return;
           }
@@ -551,10 +563,14 @@
             hls.recoverMediaError();
             return;
           }
+          const url = hlsUrl;
           destroyHls();
-          showOffline("Playback error — will retry.");
-          setTimeout(() => loadPreview(hlsUrl), 5000);
+          showOffline(`Playback error: ${data.details || data.type}`);
+          retryTimer = setTimeout(() => loadPreview(url), 3000);
         });
+
+        hls.attachMedia(video);
+        hls.loadSource(hlsUrl);
       }
 
       function showLive() {
@@ -594,7 +610,7 @@
       });
 
       // ── Status / render ───────────────────────────────────────────────────
-      function render({ running, token, hlsHttpUrl, hlsHttpsUrl }) {
+      function render({ running, token, hlsHttpUrl }) {
         document.getElementById("dot").className =
           "dot" + (running ? " live" : "");
         document.getElementById("statusLabel").innerHTML =
@@ -606,8 +622,9 @@
         if (running && token) {
           block.classList.add("visible");
           document.getElementById("hlsUrl").textContent = hlsHttpUrl;
-          loadPreview(hlsHttpsUrl);
-          if (!previewEnabled) {
+          if (previewEnabled) {
+            loadPreview(previewPath(token));
+          } else {
             destroyHls();
             showOffline("Preview disabled.");
           }

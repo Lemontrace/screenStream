@@ -49,9 +49,7 @@ const HLS_DELETE_THRESHOLD = process.env.HLS_DELETE_THRESHOLD || "4";
 
 // Orphan cleanup — only when idle; FFmpeg delete_segments handles live cleanup
 const HLS_MAX_SEGMENTS = Number(process.env.HLS_MAX_SEGMENTS || "60");
-const HLS_CLEAN_INTERVAL_MS = Number(
-  process.env.HLS_CLEAN_INTERVAL_MS || "0",
-);
+const HLS_CLEAN_INTERVAL_MS = Number(process.env.HLS_CLEAN_INTERVAL_MS || "0");
 
 // Video mode
 const VIDEO_MODE = process.env.VIDEO_MODE || "copy"; // "copy" | "encode"
