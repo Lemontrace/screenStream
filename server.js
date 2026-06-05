@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 import crypto from "node:crypto";
@@ -78,6 +78,9 @@ let streamToken = null; // null = stopped; hex string = live
 let ffmpegChild = null;
 let srtRelayChild = null;
 let fifoFd = null;
+let pipelineRestartTimer = null;
+let relayRestartTimer = null;
+const RESTART_DELAY_MS = 2000;
 
 function generateToken() {
   return crypto.randomBytes(16).toString("hex");
@@ -242,23 +245,32 @@ function fifoInputArgs() {
   ];
 }
 
+function createFifo(filePath) {
+  if (typeof fs.mkfifoSync === "function") {
+    fs.mkfifoSync(filePath, 0o600);
+    return;
+  }
+  const r = spawnSync("mkfifo", ["-m", "600", filePath], { encoding: "utf8" });
+  if (r.error) throw r.error;
+  if (r.status !== 0) {
+    throw new Error(r.stderr?.trim() || `mkfifo exited ${r.status}`);
+  }
+}
+
 function openFifo() {
   ensureDir(HLS_DIR);
+  closeFifo();
   try {
     if (fs.existsSync(SRT_FIFO)) {
       const st = fs.statSync(SRT_FIFO);
       if (!st.isFIFO()) fs.unlinkSync(SRT_FIFO);
     }
-    if (!fs.existsSync(SRT_FIFO)) fs.mkfifoSync(SRT_FIFO);
+    if (!fs.existsSync(SRT_FIFO)) createFifo(SRT_FIFO);
+    fifoFd = fs.openSync(SRT_FIFO, fs.constants.O_RDWR);
+    return true;
   } catch (err) {
-    console.error(`[fifo] create failed: ${err.message}`);
-  }
-  if (fifoFd === null) {
-    try {
-      fifoFd = fs.openSync(SRT_FIFO, fs.constants.O_RDWR);
-    } catch (err) {
-      console.error(`[fifo] open failed: ${err.message}`);
-    }
+    console.error(`[fifo] setup failed: ${err.message}`);
+    return false;
   }
 }
 
@@ -290,21 +302,28 @@ function buildSrtRelayArgs() {
 }
 
 function stopSrtRelay() {
+  clearTimeout(relayRestartTimer);
+  relayRestartTimer = null;
   if (!srtRelayChild) return;
   const child = srtRelayChild;
   srtRelayChild = null;
-  child.kill("SIGTERM");
-  setTimeout(() => {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      /* already exited */
-    }
-  }, 1500);
+  child.removeAllListeners("exit");
+  child.kill("SIGKILL");
+}
+
+function scheduleRelayRestart() {
+  clearTimeout(relayRestartTimer);
+  relayRestartTimer = setTimeout(() => {
+    relayRestartTimer = null;
+    if (streamToken === null || shuttingDown) return;
+    stopSrtRelay();
+    startSrtRelay();
+  }, RESTART_DELAY_MS);
 }
 
 function startSrtRelay() {
   if (!FILLER_FRAMES || streamToken === null || shuttingDown) return;
+  if (!fifoFd && !openFifo()) return;
   stopSrtRelay();
   srtRelayChild = spawn("ffmpeg", buildSrtRelayArgs(), {
     stdio: ["ignore", "inherit", "inherit"],
@@ -313,9 +332,9 @@ function startSrtRelay() {
     srtRelayChild = null;
     if (shuttingDown || streamToken === null) return;
     console.warn(
-      `[srt-relay] ingest ended (code=${code}, signal=${signal}), restarting in 1s`,
+      `[srt-relay] ingest ended (code=${code}, signal=${signal}), restarting listener`,
     );
-    setTimeout(() => restartPipeline(false), 1000);
+    scheduleRelayRestart();
   });
 }
 
@@ -445,29 +464,45 @@ function startMainFfmpeg(clearSegments = true) {
     ffmpegChild = null;
     if (shuttingDown || streamToken === null) return;
     console.warn(
-      `[ffmpeg] hls encoder exited (code=${code}, signal=${signal}), restarting in 1s`,
+      `[ffmpeg] hls encoder exited (code=${code}, signal=${signal}), restarting`,
     );
-    setTimeout(() => restartPipeline(false), 1000);
+    schedulePipelineRestart(false);
   });
+}
+
+function schedulePipelineRestart(clearSegments = false) {
+  clearTimeout(pipelineRestartTimer);
+  pipelineRestartTimer = setTimeout(() => {
+    pipelineRestartTimer = null;
+    restartPipeline(clearSegments);
+  }, RESTART_DELAY_MS);
 }
 
 function restartPipeline(clearSegments = true) {
   if (streamToken === null || shuttingDown) return;
   killMain();
   stopSrtRelay();
-  if (FILLER_FRAMES) openFifo();
+  if (FILLER_FRAMES && !openFifo()) return;
   startMainFfmpeg(clearSegments);
   if (FILLER_FRAMES) startSrtRelay();
 }
 
 function startFfmpeg(clearSegments = true) {
   ensureDir(HLS_DIR);
-  if (FILLER_FRAMES) openFifo();
+  if (FILLER_FRAMES && !openFifo()) {
+    console.error("[stream] failed to create SRT pipe — not starting");
+    return false;
+  }
   startMainFfmpeg(clearSegments);
   if (FILLER_FRAMES) startSrtRelay();
+  return true;
 }
 
 function stopFfmpeg() {
+  clearTimeout(pipelineRestartTimer);
+  clearTimeout(relayRestartTimer);
+  pipelineRestartTimer = null;
+  relayRestartTimer = null;
   stopSrtRelay();
   if (ffmpegChild) {
     const child = ffmpegChild;
@@ -585,7 +620,10 @@ app.get("/admin/status", requireAuth, (req, res) => {
 app.post("/admin/start", requireAuth, (req, res) => {
   if (ffmpegChild) return res.json({ ok: false, error: "Already running." });
   streamToken = generateToken();
-  startFfmpeg();
+  if (!startFfmpeg()) {
+    streamToken = null;
+    return res.json({ ok: false, error: "Failed to start stream pipeline." });
+  }
   console.log(`[stream] started — token: ${streamToken}`);
   res.json({ ok: true, token: streamToken });
 });
