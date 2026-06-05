@@ -44,6 +44,7 @@ const SRT_URL =
 // HLS output
 const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
 const PLAYLIST = process.env.PLAYLIST || "index.m3u8";
+const SRT_FIFO = path.join(HLS_DIR, ".srt.pipe");
 
 // HLS tuning — 1s segments target low glass-to-glass latency in the browser
 const HLS_TIME = process.env.HLS_TIME || "1";
@@ -75,6 +76,8 @@ const FFANALYZE_DURATION = process.env.FFANALYZE_DURATION || "1000000"; // 1s (�
 // ---------------------------------------------------------------------------
 let streamToken = null; // null = stopped; hex string = live
 let ffmpegChild = null;
+let srtRelayChild = null;
+let fifoFd = null;
 
 function generateToken() {
   return crypto.randomBytes(16).toString("hex");
@@ -224,6 +227,98 @@ function srtInputArgs() {
   ];
 }
 
+function fifoInputArgs() {
+  return [
+    "-f",
+    "mpegts",
+    "-thread_queue_size",
+    "1024",
+    "-err_detect",
+    "ignore_err",
+    "-fflags",
+    "+discardcorrupt+genpts",
+    "-i",
+    SRT_FIFO,
+  ];
+}
+
+function openFifo() {
+  ensureDir(HLS_DIR);
+  try {
+    if (fs.existsSync(SRT_FIFO)) {
+      const st = fs.statSync(SRT_FIFO);
+      if (!st.isFIFO()) fs.unlinkSync(SRT_FIFO);
+    }
+    if (!fs.existsSync(SRT_FIFO)) fs.mkfifoSync(SRT_FIFO);
+  } catch (err) {
+    console.error(`[fifo] create failed: ${err.message}`);
+  }
+  if (fifoFd === null) {
+    try {
+      fifoFd = fs.openSync(SRT_FIFO, fs.constants.O_RDWR);
+    } catch (err) {
+      console.error(`[fifo] open failed: ${err.message}`);
+    }
+  }
+}
+
+function closeFifo() {
+  if (fifoFd !== null) {
+    try {
+      fs.closeSync(fifoFd);
+    } catch {
+      /* ignore */
+    }
+    fifoFd = null;
+  }
+}
+
+function buildSrtRelayArgs() {
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "warning",
+    ...srtInputArgs(),
+    "-c",
+    "copy",
+    "-f",
+    "mpegts",
+    "-flush_packets",
+    "1",
+    SRT_FIFO,
+  ];
+}
+
+function stopSrtRelay() {
+  if (!srtRelayChild) return;
+  const child = srtRelayChild;
+  srtRelayChild = null;
+  child.kill("SIGTERM");
+  setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already exited */
+    }
+  }, 1500);
+}
+
+function startSrtRelay() {
+  if (!FILLER_FRAMES || streamToken === null || shuttingDown) return;
+  stopSrtRelay();
+  srtRelayChild = spawn("ffmpeg", buildSrtRelayArgs(), {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  srtRelayChild.on("exit", (code, signal) => {
+    srtRelayChild = null;
+    if (shuttingDown || streamToken === null) return;
+    console.warn(
+      `[srt-relay] ingest ended (code=${code}, signal=${signal}), restarting in 1s`,
+    );
+    setTimeout(() => restartPipeline(false), 1000);
+  });
+}
+
 function encodeVideoArgs() {
   return [
     "-c:v",
@@ -315,7 +410,7 @@ function buildFfmpegArgs() {
     "lavfi",
     "-i",
     "anullsrc=r=48000:cl=stereo",
-    ...srtInputArgs(),
+    ...fifoInputArgs(),
     "-filter_complex",
     filter,
     "-map",
@@ -331,8 +426,15 @@ function buildFfmpegArgs() {
   ];
 }
 
-function startFfmpeg(clearSegments = true) {
-  ensureDir(HLS_DIR);
+function killMain() {
+  if (!ffmpegChild) return;
+  const child = ffmpegChild;
+  ffmpegChild = null;
+  child.removeAllListeners("exit");
+  child.kill("SIGTERM");
+}
+
+function startMainFfmpeg(clearSegments = true) {
   if (clearSegments) clearSegmentsOnStart();
 
   ffmpegChild = spawn("ffmpeg", buildFfmpegArgs(), {
@@ -342,29 +444,46 @@ function startFfmpeg(clearSegments = true) {
   ffmpegChild.on("exit", (code, signal) => {
     ffmpegChild = null;
     if (shuttingDown || streamToken === null) return;
-    const reason =
-      code === 0
-        ? "SRT disconnected — restarting listener"
-        : `code=${code}, signal=${signal}`;
-    console.warn(`[ffmpeg] exited (${reason}), restarting in 1s`);
-    // Keep existing HLS segments when filler is on — output stays continuous
-    setTimeout(() => startFfmpeg(!FILLER_FRAMES), 1000);
+    console.warn(
+      `[ffmpeg] hls encoder exited (code=${code}, signal=${signal}), restarting in 1s`,
+    );
+    setTimeout(() => restartPipeline(false), 1000);
   });
 }
 
+function restartPipeline(clearSegments = true) {
+  if (streamToken === null || shuttingDown) return;
+  killMain();
+  stopSrtRelay();
+  if (FILLER_FRAMES) openFifo();
+  startMainFfmpeg(clearSegments);
+  if (FILLER_FRAMES) startSrtRelay();
+}
+
+function startFfmpeg(clearSegments = true) {
+  ensureDir(HLS_DIR);
+  if (FILLER_FRAMES) openFifo();
+  startMainFfmpeg(clearSegments);
+  if (FILLER_FRAMES) startSrtRelay();
+}
+
 function stopFfmpeg() {
-  if (!ffmpegChild) return;
-  const child = ffmpegChild;
-  ffmpegChild = null;
-  child.kill("SIGTERM");
-  setTimeout(() => {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      /* already exited */
-    }
-    clearSegmentsOnStart();
-  }, 1500);
+  stopSrtRelay();
+  if (ffmpegChild) {
+    const child = ffmpegChild;
+    ffmpegChild = null;
+    child.removeAllListeners("exit");
+    child.kill("SIGTERM");
+    setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already exited */
+      }
+    }, 1500);
+  }
+  clearSegmentsOnStart();
+  closeFifo();
 }
 
 // ---------------------------------------------------------------------------
@@ -553,7 +672,9 @@ hlsApp.get("/:token/hls/:file", (req, res) => {
 const hlsServer = http.createServer(hlsApp).listen(HLS_PORT, HOST, () => {
   console.log(
     `[hls] mpegts · ${HLS_TIME}s segments · playlist ${HLS_LIST_SIZE}` +
-      (FILLER_FRAMES ? ` · filler ${FILLER_WIDTH}x${FILLER_HEIGHT}@${FILLER_FPS}fps` : ""),
+      (FILLER_FRAMES
+        ? ` · filler ${FILLER_WIDTH}x${FILLER_HEIGHT}@${FILLER_FPS}fps · srt relay`
+        : ""),
   );
   if (HLS_CLEAN_INTERVAL_MS > 0)
     setInterval(cleanupOldSegments, HLS_CLEAN_INTERVAL_MS);
