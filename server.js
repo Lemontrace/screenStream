@@ -45,9 +45,9 @@ const SRT_FIFO = path.join(HLS_DIR, ".srt.pipe");
 
 // HLS tuning — 1s segments target low glass-to-glass latency in the browser
 const HLS_TIME = process.env.HLS_TIME || "1";
-const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "5";
+const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "6";
 // Extra segments kept on disk beyond the playlist before FFmpeg deletes them
-const HLS_DELETE_THRESHOLD = process.env.HLS_DELETE_THRESHOLD || "4";
+const HLS_DELETE_THRESHOLD = process.env.HLS_DELETE_THRESHOLD || "8";
 
 // Orphan cleanup — only when idle; FFmpeg delete_segments handles live cleanup
 const HLS_MAX_SEGMENTS = Number(process.env.HLS_MAX_SEGMENTS || "60");
