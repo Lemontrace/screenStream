@@ -56,6 +56,10 @@ const HLS_CLEAN_INTERVAL_MS = Number(
 // Video mode
 const VIDEO_MODE = process.env.VIDEO_MODE || "copy"; // "copy" | "encode"
 
+// Input probe — must be large enough to read H.264 SPS/PPS from the first keyframe
+const FFPROBE_SIZE = process.env.FFPROBE_SIZE || "1048576"; // 1 MB
+const FFANALYZE_DURATION = process.env.FFANALYZE_DURATION || "1000000"; // 1s (µs)
+
 // ---------------------------------------------------------------------------
 // Stream state
 // ---------------------------------------------------------------------------
@@ -186,9 +190,9 @@ function startFfmpeg() {
     "-flags",
     "low_delay",
     "-probesize",
-    "32",
+    FFPROBE_SIZE,
     "-analyzeduration",
-    "0",
+    FFANALYZE_DURATION,
     "-i",
     SRT_URL,
     "-map",
@@ -253,9 +257,11 @@ function startFfmpeg() {
   ffmpegChild.on("exit", (code, signal) => {
     ffmpegChild = null;
     if (shuttingDown || streamToken === null) return;
-    console.error(
-      `[ffmpeg] exited (code=${code}, signal=${signal}), restarting in 1s`,
-    );
+    const reason =
+      code === 0
+        ? "input disconnected (OBS stopped or SRT dropped)"
+        : `code=${code}, signal=${signal}`;
+    console.warn(`[ffmpeg] exited (${reason}), restarting in 1s`);
     setTimeout(startFfmpeg, 1000);
   });
 }
