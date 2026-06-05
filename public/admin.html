@@ -460,6 +460,7 @@
     <script>
       const origin = location.origin;
       let pollTimer = null;
+      let latencyTimer = null;
       let hls = null;
       let currentHls = null;
       let muted = true;
@@ -484,6 +485,8 @@
       const segInfo = document.getElementById("segInfo");
 
       function destroyHls() {
+        clearInterval(latencyTimer);
+        latencyTimer = null;
         if (hls) {
           hls.destroy();
           hls = null;
@@ -514,8 +517,11 @@
 
         hls = new Hls({
           lowLatencyMode: true,
-          liveSyncDurationCount: 2,
-          liveMaxLatencyDurationCount: 4,
+          liveSyncDurationCount: 1,
+          liveMaxLatencyDurationCount: 3,
+          liveMaxLatencyDuration: 4,
+          maxLiveSyncPlaybackRate: 1.25,
+          backBufferLength: 0,
         });
 
         hls.loadSource(hlsUrl);
@@ -525,23 +531,29 @@
           video.muted = muted;
           video.play().catch(() => {});
           showLive();
-        });
-
-        hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
-          const kb = Math.round(data.frag.stats.total / 1024);
-          segInfo.textContent = `seg ${data.frag.sn} · ${kb} KB`;
+          clearInterval(latencyTimer);
+          latencyTimer = setInterval(() => {
+            if (!hls) return;
+            const lat =
+              typeof hls.latency === "number" ? hls.latency.toFixed(1) : "—";
+            segInfo.textContent = `~${lat}s behind live`;
+          }, 500);
         });
 
         hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) {
-            destroyHls();
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              setTimeout(() => loadPreview(hlsUrl), 2000);
-            } else {
-              showOffline("Playback error — will retry.");
-              setTimeout(() => loadPreview(hlsUrl), 5000);
-            }
+          if (!data.fatal) return;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            // Recover in-place — avoids visible reload hiccup on a missed segment
+            hls.startLoad(-1);
+            return;
           }
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+            return;
+          }
+          destroyHls();
+          showOffline("Playback error — will retry.");
+          setTimeout(() => loadPreview(hlsUrl), 5000);
         });
       }
 

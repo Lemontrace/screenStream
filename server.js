@@ -32,22 +32,27 @@ const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || "";
 if (!SRT_PASSPHRASE) {
   console.warn("[warn] SRT_PASSPHRASE is not set — stream is unauthenticated");
 }
+const SRT_LATENCY = Number(process.env.SRT_LATENCY || "120"); // ms receiver buffer
 const SRT_URL =
   process.env.SRT_URL ||
-  `srt://0.0.0.0:5555?mode=listener&pbkeylen=32${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
+  `srt://0.0.0.0:5555?mode=listener&pbkeylen=32&latency=${SRT_LATENCY}${SRT_PASSPHRASE ? `&passphrase=${SRT_PASSPHRASE}` : ""}`;
 
 // HLS output
 const HLS_DIR = process.env.HLS_DIR || path.join(PUBLIC, "hls");
 const PLAYLIST = process.env.PLAYLIST || "index.m3u8";
 
-// HLS tuning
-const HLS_TIME = process.env.HLS_TIME || "2";
-const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "3";
+// HLS tuning — 1s segments + partials target ~1–2s glass-to-glass in the browser
+const HLS_TIME = process.env.HLS_TIME || "1";
+const HLS_LIST_SIZE = process.env.HLS_LIST_SIZE || "5";
+const HLS_PART_TIME = process.env.HLS_PART_TIME || "0.25";
+const HLS_LL = process.env.HLS_LL !== "0"; // fMP4 partial segments (LL-HLS)
+// Extra segments kept on disk beyond the playlist before FFmpeg deletes them
+const HLS_DELETE_THRESHOLD = process.env.HLS_DELETE_THRESHOLD || "4";
 
-// Segment cleanup
+// Orphan cleanup — only when idle; FFmpeg delete_segments handles live cleanup
 const HLS_MAX_SEGMENTS = Number(process.env.HLS_MAX_SEGMENTS || "60");
 const HLS_CLEAN_INTERVAL_MS = Number(
-  process.env.HLS_CLEAN_INTERVAL_MS || "15000",
+  process.env.HLS_CLEAN_INTERVAL_MS || "0",
 );
 
 // Video mode
@@ -122,10 +127,19 @@ function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
 }
 
+function isHlsSegment(name) {
+  return (
+    name.endsWith(".ts") ||
+    name.endsWith(".m4s") ||
+    name === "init.mp4" ||
+    name === PLAYLIST
+  );
+}
+
 function clearSegmentsOnStart() {
   try {
     for (const name of fs.readdirSync(HLS_DIR)) {
-      if (!name.endsWith(".ts") && name !== PLAYLIST) continue;
+      if (!isHlsSegment(name)) continue;
       try {
         fs.unlinkSync(path.join(HLS_DIR, name));
       } catch {
@@ -138,12 +152,14 @@ function clearSegmentsOnStart() {
 }
 
 function cleanupOldSegments() {
+  // Never delete segments while FFmpeg is writing — races cause 404s and playback hiccups.
+  if (ffmpegChild) return;
   if (!Number.isFinite(HLS_MAX_SEGMENTS) || HLS_MAX_SEGMENTS <= 0) return;
   fs.readdir(HLS_DIR, (err, files) => {
     if (err) return;
-    const tsFiles = files.filter((f) => f.endsWith(".ts"));
-    if (tsFiles.length <= HLS_MAX_SEGMENTS) return;
-    const withStats = tsFiles
+    const segFiles = files.filter((f) => f.endsWith(".ts") || f.endsWith(".m4s"));
+    if (segFiles.length <= HLS_MAX_SEGMENTS) return;
+    const withStats = segFiles
       .map((name) => {
         const full = path.join(HLS_DIR, name);
         try {
@@ -173,9 +189,13 @@ function startFfmpeg() {
     "-loglevel",
     "warning",
     "-fflags",
-    "nobuffer",
+    "nobuffer+flush_packets",
     "-flags",
     "low_delay",
+    "-probesize",
+    "32",
+    "-analyzeduration",
+    "0",
     "-i",
     SRT_URL,
     "-map",
@@ -204,21 +224,49 @@ function startFfmpeg() {
         ]
       : ["-c:v", "copy"];
 
-  const audioArgs = ["-c:a", "aac", "-b:a", "256k"];
+  const audioArgs =
+    VIDEO_MODE === "encode"
+      ? ["-c:a", "aac", "-b:a", "128k"]
+      : ["-c:a", "copy"];
+
+  const hlsFlags = HLS_LL
+    ? "delete_segments+append_list+independent_segments+program_date_time"
+    : "delete_segments+append_list+independent_segments";
 
   const outputArgs = [
+    "-muxdelay",
+    "0",
+    "-muxpreload",
+    "0",
     "-f",
     "hls",
     "-hls_time",
     String(HLS_TIME),
     "-hls_list_size",
     String(HLS_LIST_SIZE),
+    "-hls_delete_threshold",
+    String(HLS_DELETE_THRESHOLD),
     "-hls_flags",
-    "delete_segments+append_list+independent_segments",
-    "-hls_segment_filename",
-    path.join(HLS_DIR, "seg_%06d.ts"),
-    path.join(HLS_DIR, PLAYLIST),
+    hlsFlags,
   ];
+
+  if (HLS_LL) {
+    outputArgs.push(
+      "-hls_segment_type",
+      "fmp4",
+      "-hls_part_time",
+      String(HLS_PART_TIME),
+      "-hls_segment_filename",
+      path.join(HLS_DIR, "seg_%06d.m4s"),
+    );
+  } else {
+    outputArgs.push(
+      "-hls_segment_filename",
+      path.join(HLS_DIR, "seg_%06d.ts"),
+    );
+  }
+
+  outputArgs.push(path.join(HLS_DIR, PLAYLIST));
 
   ffmpegChild = spawn(
     "ffmpeg",
@@ -240,9 +288,17 @@ function startFfmpeg() {
 
 function stopFfmpeg() {
   if (!ffmpegChild) return;
-  ffmpegChild.kill("SIGTERM");
-  setTimeout(() => ffmpegChild?.kill("SIGKILL"), 1500);
+  const child = ffmpegChild;
   ffmpegChild = null;
+  child.kill("SIGTERM");
+  setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already exited */
+    }
+    clearSegmentsOnStart();
+  }, 1500);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +422,16 @@ function hlsMiddleware(req, res, next) {
   const base = hlsBasePath(streamToken);
   if (!req.path.startsWith(base + "/")) return next();
   req.url = req.path.slice(base.length);
-  express.static(HLS_DIR, { etag: false })(req, res, next);
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  express.static(HLS_DIR, {
+    etag: false,
+    lastModified: false,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith(".m3u8")) {
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      }
+    },
+  })(req, res, next);
 }
 
 app.use(hlsMiddleware);
