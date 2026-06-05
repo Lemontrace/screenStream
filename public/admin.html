@@ -458,7 +458,6 @@
     <!-- /.layout -->
 
     <script>
-      const PLAYLIST = "index.m3u8";
       let pollTimer = null;
       let latencyTimer = null;
       let retryTimer = null;
@@ -466,10 +465,6 @@
       let currentHls = null;
       let muted = true;
       let previewEnabled = true;
-
-      function previewPath(token) {
-        return token ? `/${token}/hls/${PLAYLIST}` : null;
-      }
 
       // ── Toast ──────────────────────────────────────────────────────────────
       function toast(msg, isError = false) {
@@ -501,16 +496,38 @@
         currentHls = null;
       }
 
-      function loadPreview(hlsUrl) {
+      async function playlistReady(hlsUrl) {
+        try {
+          const r = await fetch(hlsUrl, { cache: "no-store" });
+          if (!r.ok) return false;
+          const text = await r.text();
+          return text.includes("#EXTINF");
+        } catch {
+          return false;
+        }
+      }
+
+      function scheduleRetry(hlsUrl, ms = 1000) {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => loadPreview(hlsUrl), ms);
+      }
+
+      async function loadPreview(hlsUrl) {
         if (!hlsUrl || !previewEnabled) return;
-        // Only skip when a player instance is actually running this URL
         if (currentHls === hlsUrl && hls) return;
 
+        clearTimeout(retryTimer);
+
+        if (!(await playlistReady(hlsUrl))) {
+          showOffline("Waiting for stream…");
+          scheduleRetry(hlsUrl);
+          return;
+        }
+
+        if (currentHls === hlsUrl && hls) return;
         destroyHls();
-        currentHls = hlsUrl;
 
         if (typeof Hls === "undefined") {
-          currentHls = null;
           showOffline("hls.js failed to load.");
           return;
         }
@@ -519,6 +536,7 @@
           video.canPlayType("application/vnd.apple.mpegurl") &&
           !Hls.isSupported()
         ) {
+          currentHls = hlsUrl;
           video.src = hlsUrl;
           video.muted = muted;
           video.play().catch((err) => showOffline(`Autoplay blocked: ${err.message}`));
@@ -527,11 +545,11 @@
         }
 
         if (!Hls.isSupported()) {
-          currentHls = null;
           showOffline("HLS not supported in this browser.");
           return;
         }
 
+        currentHls = hlsUrl;
         hls = new Hls({
           lowLatencyMode: false,
           liveSyncDurationCount: 2,
@@ -555,6 +573,15 @@
         hls.on(Hls.Events.ERROR, (_, data) => {
           console.warn("[hls]", data.type, data.details, data);
           if (!data.fatal) return;
+          if (
+            data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+            data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR
+          ) {
+            destroyHls();
+            showOffline("Waiting for stream…");
+            scheduleRetry(hlsUrl);
+            return;
+          }
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             hls.startLoad(-1);
             return;
@@ -566,7 +593,7 @@
           const url = hlsUrl;
           destroyHls();
           showOffline(`Playback error: ${data.details || data.type}`);
-          retryTimer = setTimeout(() => loadPreview(url), 3000);
+          scheduleRetry(url, 3000);
         });
 
         hls.attachMedia(video);
@@ -610,7 +637,7 @@
       });
 
       // ── Status / render ───────────────────────────────────────────────────
-      function render({ running, token, hlsHttpUrl }) {
+      function render({ running, token, hlsHttpUrl, hlsHttpsUrl }) {
         document.getElementById("dot").className =
           "dot" + (running ? " live" : "");
         document.getElementById("statusLabel").innerHTML =
@@ -623,7 +650,7 @@
           block.classList.add("visible");
           document.getElementById("hlsUrl").textContent = hlsHttpUrl;
           if (previewEnabled) {
-            loadPreview(previewPath(token));
+            loadPreview(hlsHttpsUrl);
           } else {
             destroyHls();
             showOffline("Preview disabled.");
